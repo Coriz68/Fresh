@@ -99,7 +99,11 @@ function openDatabase() {
 }
 
 async function waitForDesktopBridge() {
-  if (window.pywebview?.api) return window.pywebview.api;
+  const api = () => {
+    const candidate = window.pywebview?.api;
+    return typeof candidate?.load_initial_data === 'function' ? candidate : null;
+  };
+  if (api()) return api();
   await new Promise(resolve => {
     const timeout = setTimeout(resolve, 1500);
     window.addEventListener('pywebviewready', () => {
@@ -107,7 +111,7 @@ async function waitForDesktopBridge() {
       resolve();
     }, { once: true });
   });
-  return window.pywebview?.api || null;
+  return api();
 }
 
 function readState() {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,7 @@ from typing import Any
 from local_store import LocalStore
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 APP_TITLE = "Gestionale preventivi"
 
 
@@ -176,7 +177,7 @@ def main() -> None:
     api = DesktopApi()
     window = webview.create_window(
         APP_TITLE,
-        url="Gestione_preventivi.html",
+        url=(ROOT / "Gestione_preventivi.html").resolve().as_uri(),
         js_api=api,
         width=1440,
         height=920,

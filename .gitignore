@@ -5,6 +5,7 @@ __pycache__/
 venv/
 build/
 dist/
+dist-installer/
 *.spec.tmp
 preventivi.json
 settings.json

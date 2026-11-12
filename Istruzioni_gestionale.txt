@@ -1,9 +1,14 @@
-GESTIONALE PREVENTIVI — VERSIONE DI PROVA DESKTOP
+GESTIONALE PREVENTIVI — VERSIONE 1.0.0
 
-REQUISITI
+INSTALLER WINDOWS
+- Il setup `Gestionale Preventivi 1.0 Setup.exe` installa l'app autonoma su Windows 10/11 a 64 bit; Python non è richiesto.
+- È necessario Microsoft Edge WebView2 Evergreen Runtime. Se manca, il setup mostra il collegamento al sito Microsoft e si interrompe.
+- Consulta `docs/INSTALLAZIONE_WINDOWS.md` per checksum, avvisi di sicurezza e istruzioni di installazione.
+
+REQUISITI PER AVVIO DALLA SORGENTE
 - Python 3 installato sul computer.
 - Connessione internet solo al primo avvio, per installare pywebview nella cartella .venv.
-- Su Windows è necessario il runtime WebView2 (normalmente presente in Windows 10/11 aggiornato).
+- Su Windows è necessario il runtime WebView2.
 
 AVVIO SU MAC
 1. Fai doppio clic su Avvia_gestionale.command. Se macOS lo blocca, usa il menu contestuale > Apri.
@@ -29,5 +34,5 @@ PREVENTIVI E PDF
 4. Ogni PDF viene salvato nella cartella scelta per la relativa destinazione. Se un file con lo stesso nome esiste già, viene creato un nome con suffisso numerico.
 5. La finestra di anteprima permette anche di scaricare una copia.
 
-PROVA E LIMITI
-Questa è una versione di sviluppo da verificare prima di preparare un installer Windows. Non è ancora un file eseguibile autonomo: il codice sorgente richiede Python e il runtime WebView2 su Windows. La versione Mac serve per provare funzioni, dati e PDF; la verifica finale su Windows va eseguita su un computer Windows.
+VERIFICA WINDOWS
+Prima della consegna, prova installazione, avvio, generazione dei due PDF, cartelle locali, backup e disinstallazione su un computer Windows 10/11. Il setup non è firmato digitalmente e Windows potrebbe mostrare l'avviso per autore sconosciuto.

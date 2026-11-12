@@ -1,6 +1,6 @@
-# Gestionale preventivi — versione di prova
+# Gestionale preventivi — versione 1.0.0
 
-Questa versione avvia il gestionale in una finestra desktop su macOS e Windows. Non include ancora un `.exe`: la preparazione dell’eseguibile Windows resta per una fase successiva alla verifica dell’app.
+Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
 
 ## Requisiti
 
@@ -16,11 +16,13 @@ Questa versione avvia il gestionale in una finestra desktop su macOS e Windows. 
 2. Attendi la creazione di `.venv` e l’installazione dei componenti al primo avvio.
 3. Si apre la finestra **Gestionale preventivi**. Chiudila per uscire.
 
-### Windows
+### Windows — avvio dalla sorgente
 
 1. Installa Python 3 e, se necessario, WebView2 Runtime.
 2. Avvia `Avvia_gestionale_windows.bat`.
 3. Al primo avvio vengono creati `.venv` e i componenti Python. Gli avvii successivi aprono direttamente la finestra.
+
+Il setup per la distribuzione installa invece l'applicazione autonoma; richiede Microsoft Edge WebView2 Evergreen Runtime.
 
 Il progetto deve restare nella sua cartella: i moduli HTML originali e i relativi file grafici sono caricati localmente. La cartella `.venv` contiene solo dipendenze di sviluppo e può essere ricreata dal launcher.
 
@@ -38,7 +40,7 @@ In **Azienda e PDF** seleziona una cartella database e due cartelle PDF diverse.
 
 Esporta periodicamente un backup JSON e custodiscilo separatamente dal computer. Il database non è cifrato.
 
-## Lista di verifica prima dell’eseguibile Windows
+## Verifiche
 
 - [ ] Avvio e chiusura della finestra su macOS.
 - [ ] Selezione cartelle e riapertura dello stesso database su macOS.
@@ -47,5 +49,4 @@ Esporta periodicamente un backup JSON e custodiscilo separatamente dal computer.
 - [ ] PDF fornitore: tutti i moduli, nome cliente e numero preventivo, nessun riepilogo o prezzo.
 - [ ] Verifica dei due PDF e dei percorsi su Windows 10/11.
 - [ ] Verifica backup/importazione su Windows.
-
-Non creare né consegnare un eseguibile finché la verifica Windows non è completata e l’utente non ha approvato esplicitamente la fase di packaging.
+- [ ] Prova installazione, avvio e disinstallazione del setup su Windows 10/11.
