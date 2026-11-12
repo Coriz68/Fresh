@@ -68,7 +68,9 @@ jobs:
         run: |
           $installer = "dist-installer/Gestionale Preventivi 1.0 Setup.exe"
           if (-not (Test-Path $installer)) { throw "Installer non generato" }
-          (Get-FileHash $installer -Algorithm SHA256).Hash + "  Gestionale Preventivi 1.0 Setup.exe" | Set-Content "dist-installer/SHA256SUMS.txt"
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
+          $checksum = "$hash  Gestionale Preventivi 1.0 Setup.exe`n"
+          [System.IO.File]::WriteAllText("dist-installer/SHA256SUMS.txt", $checksum, [System.Text.Encoding]::ASCII)
           Copy-Item "docs/INSTALLAZIONE_WINDOWS.md" "dist-installer/ISTRUZIONI.txt"
 
       - name: Carica installer e hash
