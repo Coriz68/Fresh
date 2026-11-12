@@ -210,54 +210,15 @@ get('#file').onchange=async e=>{
     data=next;dirty=false;updateDraft();renderFields();statusMessage('Ordine riaperto da '+file.name);
   } catch(error) { statusMessage('File non valido. '+error.message,true); }
 };
-// Generate an editable order on the original artwork. Widget rectangles use
-// PDF bottom-left coordinates; the web form uses the top left of the sheet.
+// Flatten the filled order onto the original artwork as a single overlay.
+// This avoids PDF viewers rendering both a widget appearance and its value.
 async function makePDF() {
-  const {PDFDocument, PDFName, PDFString, PDFHexString, StandardFonts} = PDFLib;
+  const {PDFDocument} = PDFLib;
   const doc = await PDFDocument.load(get('#artwork').textContent.trim());
-  const page = doc.getPages()[0], context = doc.context;
-  const sx = page.getWidth()/model.width, sy = page.getHeight()/model.height;
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const rootFields = context.obj([]), annotations = context.obj([]);
-  const acro = context.obj({Fields:rootFields, DR:{Font:{Helv:font.ref}},DA:PDFString.of('/Helv 10 Tf 0 g')});
-  doc.catalog.set(PDFName.of('AcroForm'),context.register(acro));
-  page.node.set(PDFName.of('Annots'),annotations);
+  const page = doc.getPages()[0];
   doc.setTitle('AREA TENDA · Ordine tende da sole');
-  const painted = paint(), groups = new Map();
-  function appearance(content, w, h, resources={}) {
-    return context.register(context.flateStream(content,{Type:'XObject',Subtype:'Form',BBox:[0,0,w,h],Resources:resources}));
-  }
-  for (const f of fields) {
-    const x=f.x*sx, y=page.getHeight()-(f.y+f.h)*sy, w=f.w*sx, h=f.h*sy;
-    const widget={Type:'Annot',Subtype:'Widget',Rect:[x,y,x+w,y+h],P:page.ref,F:4,Border:[0,0,0]};
-    if (isPick(f)) {
-      const key=keyOf(f), value=pickedValue(f);
-      if (!groups.has(key)) {
-        const kids=context.obj([]);
-        const field=context.obj({FT:'Btn',Ff:32768,T:PDFString.of(key),TU:PDFHexString.fromText(f.groupLabel),Kids:kids,V:PDFName.of(data[key]||'Off')});
-        const ref=context.register(field);rootFields.push(ref);groups.set(key,{ref,kids});
-      }
-      const {ref,kids}=groups.get(key);
-      const checkPath='q 0.024 0.21 0.36 RG '+(w*.14)+' w 1 J 1 j '+(w*.14)+' '+(h*.48)+' m '+(w*.4)+' '+(h*.18)+' l '+(w*.88)+' '+(h*.88)+' l S Q';
-      const ap=context.obj({Off:appearance('',w,h)});
-      ap.set(PDFName.of(value),appearance(checkPath,w,h));
-      const item=context.register(context.obj({...widget,Parent:ref,AS:PDFName.of(data[key]===value?value:'Off'),AP:{N:ap}}));
-      annotations.push(item);kids.push(item);continue;
-    }
-    const text=printedText(f);
-    let normal;
-    if (text) {
-      const tile=document.createElement('canvas');tile.width=f.w*2;tile.height=f.h*2;
-      tile.getContext('2d').drawImage(painted,f.x*2,f.y*2,tile.width,tile.height,0,0,tile.width,tile.height);
-      const png=await doc.embedPng(tile.toDataURL('image/png'));
-      normal=appearance('q '+w+' 0 0 '+h+' 0 0 cm /Ink Do Q',w,h,{XObject:{Ink:png.ref}});
-    } else normal=appearance('',w,h);
-    const fontSize=Math.min(10,layout(f,text).size*sx);
-    const ref=context.register(context.obj({...widget,FT:'Tx',T:PDFString.of(f.id),TU:PDFHexString.fromText(f.label),
-      V:PDFHexString.fromText(text),DA:PDFString.of('/Helv '+fontSize.toFixed(2)+' Tf 0.024 0.21 0.36 rg'),
-      MaxLen:limit(f),Ff:f.kind==='textarea'?4096:0,AP:{N:normal}}));
-    rootFields.push(ref); annotations.push(ref);
-  }
+  const overlay = await doc.embedPng(paint().toDataURL('image/png'));
+  page.drawImage(overlay,{x:0,y:0,width:page.getWidth(),height:page.getHeight()});
   return doc.save({updateFieldAppearances:false});
 }
 get('#pdf').onclick=async()=>{
