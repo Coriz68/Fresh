@@ -160,14 +160,32 @@ class LocalStore:
         folder = Path(folder_value).resolve()
         if not folder.is_dir():
             raise FileNotFoundError(f"La cartella PDF non esiste: {folder}")
+        safe_name = self._safe_pdf_name(filename)
+        return self._write_pdf_file(folder, safe_name, self._decode_pdf(base64_data))
+
+    def write_pdf_copy(self, destination: str | Path, base64_data: str) -> dict[str, str]:
+        """Save a user-requested PDF copy to an explicit path without overwriting files."""
+        destination = Path(destination).expanduser().resolve()
+        folder = destination.parent
+        if not folder.is_dir():
+            raise FileNotFoundError(f"La cartella di destinazione non esiste: {folder}")
+        if not os.access(folder, os.W_OK):
+            raise PermissionError(f"La cartella di destinazione non è scrivibile: {folder}")
+        safe_name = self._safe_pdf_name(destination.name)
+        return self._write_pdf_file(folder, safe_name, self._decode_pdf(base64_data))
+
+    @staticmethod
+    def _decode_pdf(base64_data: str) -> bytes:
         try:
             payload = base64.b64decode(base64_data, validate=True)
         except (binascii.Error, ValueError, TypeError) as error:
             raise ValueError("I dati del PDF non sono validi.") from error
         if not payload.startswith(b"%PDF-"):
             raise ValueError("Il contenuto generato non è un PDF valido.")
+        return payload
 
-        safe_name = self._safe_pdf_name(filename)
+    @staticmethod
+    def _write_pdf_file(folder: Path, safe_name: str, payload: bytes) -> dict[str, str]:
         stem = Path(safe_name).stem
         suffix = Path(safe_name).suffix
         number = 1

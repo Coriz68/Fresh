@@ -67,6 +67,17 @@ class DesktopApi:
     def write_pdf(self, kind: str, filename: str, base64_data: str) -> dict[str, str]:
         return self.store.write_pdf(kind, filename, base64_data)
 
+    def save_pdf_copy(self, kind: str, filename: str, base64_data: str) -> dict[str, Any]:
+        if kind not in ("customer", "supplier"):
+            raise ValueError("Tipo di PDF non riconosciuto.")
+        selected = self._choose_save_file(filename, "PDF (*.pdf)")
+        if not selected:
+            return {"cancelled": True}
+        destination = Path(selected).expanduser()
+        if destination.suffix.lower() != ".pdf":
+            destination = destination.with_suffix(".pdf")
+        return self.store.write_pdf_copy(destination, base64_data)
+
     def export_backup(self, payload_json: str) -> dict[str, Any]:
         payload = json.loads(payload_json)
         self._validate_backup(payload)

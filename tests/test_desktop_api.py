@@ -1,3 +1,4 @@
+import base64
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,6 +60,36 @@ class DesktopApiTests(unittest.TestCase):
 
         self.assertTrue(result["cancelled"])
         self.assertIsNone(self.api.store.load()["database_path"])
+
+    def test_save_pdf_copy_uses_native_save_dialog_and_writes_to_selected_disk_path(self):
+        destination = self.root / "pdf scelti" / "copia preventivo.pdf"
+        destination.parent.mkdir()
+        self.api.window = FolderDialog([str(destination)])
+        payload = base64.b64encode(b"%PDF-1.7 sample").decode("ascii")
+
+        result = self.api.save_pdf_copy("customer", "preventivo_25_cliente.pdf", payload)
+
+        self.assertEqual(Path(result["path"]), destination.resolve())
+        self.assertEqual(destination.read_bytes(), b"%PDF-1.7 sample")
+
+    def test_save_pdf_copy_cancel_does_not_create_a_file(self):
+        self.api.window = FolderDialog(None)
+        payload = base64.b64encode(b"%PDF-1.7 sample").decode("ascii")
+
+        result = self.api.save_pdf_copy("supplier", "preventivo_25_fornitore", payload)
+
+        self.assertTrue(result["cancelled"])
+
+    def test_save_pdf_copy_never_overwrites_existing_file(self):
+        destination = self.root / "preventivo.pdf"
+        destination.write_bytes(b"existing")
+        self.api.window = FolderDialog([str(destination)])
+        payload = base64.b64encode(b"%PDF-1.7 sample").decode("ascii")
+
+        result = self.api.save_pdf_copy("customer", "preventivo.pdf", payload)
+
+        self.assertEqual(Path(result["path"]).name, "preventivo_2.pdf")
+        self.assertEqual(destination.read_bytes(), b"existing")
 
     def test_startup_reports_corrupt_database_without_replacing_it(self):
         database_file = self.database / "preventivi.json"

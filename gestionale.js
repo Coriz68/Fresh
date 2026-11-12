@@ -1012,12 +1012,28 @@ document.querySelector('#backupFile').addEventListener('change', event => {
   importBackup(event.target.files[0]).catch(error => showToast(`Backup non importato: ${error.message}`, true)).finally(() => { event.target.value = ''; });
 });
 document.querySelector('#pdfClose').addEventListener('click', () => pdfDialog.close());
-document.querySelector('#pdfDownload').addEventListener('click', () => {
+document.querySelector('#pdfDownload').addEventListener('click', async () => {
   if (!pdfUrl || !generatedPdfBytes) return;
   const quote = getQuote();
+  const number = (quote?.number || 'cliente').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const prefix = generatedPdfKind === 'customer' ? 'cliente' : 'fornitore';
+  const filename = `preventivo_${number}_${prefix}.pdf`;
+  if (desktopBridge?.save_pdf_copy) {
+    try {
+      const result = await desktopBridge.save_pdf_copy(
+        generatedPdfKind,
+        filename,
+        bytesToBase64(generatedPdfBytes)
+      );
+      if (!result.cancelled) showToast(`Copia PDF salvata: ${result.path}`);
+    } catch (error) {
+      showToast(`Copia PDF non salvata: ${error.message}`, true);
+    }
+    return;
+  }
   const link = document.createElement('a');
   link.href = pdfUrl;
-  link.download = `preventivo_${(quote?.number || 'cliente').replace(/[^a-zA-Z0-9_-]/g, '_')}_${generatedPdfKind}.pdf`;
+  link.download = filename;
   document.body.append(link);
   link.click();
   link.remove();
