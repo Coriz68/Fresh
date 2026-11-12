@@ -13,6 +13,9 @@ const toast = document.querySelector('#toast');
 
 let db;
 let state;
+let desktopBridge = null;
+let storagePaths = { database_dir: '', customer_pdf_dir: '', supplier_pdf_dir: '' };
+let databaseError = '';
 let modules = [];
 let currentPage = 'dashboard';
 let currentQuoteId = null;
@@ -23,6 +26,8 @@ let saveTimer;
 let modulePullTimer;
 let toastTimer;
 let pdfUrl = '';
+let generatedPdfBytes = null;
+let generatedPdfKind = 'customer';
 
 const emptyState = () => ({
   clients: [],
@@ -93,6 +98,18 @@ function openDatabase() {
   });
 }
 
+async function waitForDesktopBridge() {
+  if (window.pywebview?.api) return window.pywebview.api;
+  await new Promise(resolve => {
+    const timeout = setTimeout(resolve, 1500);
+    window.addEventListener('pywebviewready', () => {
+      clearTimeout(timeout);
+      resolve();
+    }, { once: true });
+  });
+  return window.pywebview?.api || null;
+}
+
 function readState() {
   return new Promise((resolve, reject) => {
     const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get('main');
@@ -119,9 +136,13 @@ function persistSoon() {
 function persistNow() {
   clearTimeout(saveTimer);
   const snapshot = structuredClone(state);
+  if (desktopBridge && (!storagePaths.database_dir || databaseError)) {
+    showToast(databaseError || 'Scegli prima la cartella del database locale.', true);
+    return Promise.resolve();
+  }
   saveQueue = saveQueue
     .catch(() => undefined)
-    .then(() => writeState(snapshot))
+    .then(() => desktopBridge ? desktopBridge.save_state(snapshot) : writeState(snapshot))
     .catch(error => showToast(`Errore di salvataggio: ${error.message}`, true));
   return saveQueue;
 }
@@ -243,6 +264,8 @@ function renderDashboard() {
       <section class="card stat"><div class="stat-label">In lavorazione</div><div class="stat-value">${openQuotes}</div><div class="stat-foot">Bozze e preventivi inviati</div></section>
       <section class="card stat"><div class="stat-label">Clienti registrati</div><div class="stat-value">${totalClients}</div><div class="stat-foot">Anagrafiche disponibili</div></section>
     </div>
+    ${desktopBridge && !storagePaths.database_dir ? '<p class="notice">Seleziona la cartella del database in “Azienda e PDF” prima di inserire i dati.</p>' : ''}
+    ${databaseError ? `<p class="notice">${esc(databaseError)}. Scegli una cartella database valida in “Azienda e PDF”. Il file non è stato modificato.</p>` : ''}
     ${!state.company.name ? '<p class="notice">Completa i dati aziendali e il logo in “Azienda e PDF”; configura il listino prima di inviare i primi preventivi.</p>' : ''}
     <div class="content-grid">
       <section class="card">
@@ -318,6 +341,16 @@ function renderPrices() {
 function renderCompany() {
   const company = state.company;
   app.innerHTML = `
+    <section class="card storage-card">
+      <div class="card-head"><div><h2>Archiviazione su disco</h2><p>Database e documenti vengono conservati localmente nei percorsi scelti.</p></div></div>
+      ${desktopBridge ? '' : '<p class="notice">La scelta delle cartelle è disponibile nella finestra desktop. Nel browser i dati restano nel database del browser.</p>'}
+      ${databaseError ? `<p class="notice">${esc(databaseError)}. Scegli una cartella database valida. Il file esistente non è stato modificato.</p>` : ''}
+      <div class="path-grid">
+        <div class="field"><label>DATABASE PREVENTIVI</label><div class="path-control"><input value="${esc(storagePaths.database_dir || 'Non selezionato')}" readonly aria-label="Cartella database"><button class="button" data-action="choose-database-folder" ${desktopBridge ? '' : 'disabled'}>Scegli cartella</button></div></div>
+        <div class="field"><label>PDF CLIENTE</label><div class="path-control"><input value="${esc(storagePaths.customer_pdf_dir || 'Non selezionata')}" readonly aria-label="Cartella PDF cliente"><button class="button" data-action="choose-customer-folder" ${desktopBridge ? '' : 'disabled'}>Scegli cartella</button></div></div>
+        <div class="field"><label>PDF FORNITORE</label><div class="path-control"><input value="${esc(storagePaths.supplier_pdf_dir || 'Non selezionata')}" readonly aria-label="Cartella PDF fornitore"><button class="button" data-action="choose-supplier-folder" ${desktopBridge ? '' : 'disabled'}>Scegli cartella</button></div></div>
+      </div>
+    </section>
     <section class="card">
       <div class="card-head"><div><h2>Intestazione e impostazioni PDF</h2><p>Questi dati sostituiscono l’intestazione AREA TENDA nel riepilogo cliente.</p></div><button class="button primary" data-action="save-company">Salva impostazioni</button></div>
       <div class="form-grid">
@@ -332,10 +365,49 @@ function renderCompany() {
         <div class="field"><label>EMAIL</label><input data-company="email" value="${esc(company.email)}"></div>
         <div class="field"><label>SITO WEB</label><input data-company="website" value="${esc(company.website)}"></div>
         <div class="field full"><label>NOTE A PIÈ DI PAGINA DEL PREVENTIVO</label><textarea data-company="footerNotes" placeholder="Condizioni, coordinate o note da riportare nel PDF">${esc(company.footerNotes)}</textarea></div>
-        <div class="field full"><label>LOGO AZIENDALE (PNG O JPEG, MAX 3 MB)</label><input id="companyLogo" type="file" accept="image/png,image/jpeg"><div class="footer-note">Il logo è conservato localmente nel database del browser.${company.logo ? '<br><button class="button small danger" data-action="remove-logo" style="margin-top:8px">Rimuovi logo</button>' : ''}</div>${company.logo ? `<img class="company-logo" src="${esc(company.logo)}" alt="Logo aziendale">` : ''}</div>
+        <div class="field full"><label>LOGO AZIENDALE (PNG O JPEG, MAX 3 MB)</label><input id="companyLogo" type="file" accept="image/png,image/jpeg"><div class="footer-note">Il logo viene conservato nel database locale.${company.logo ? '<br><button class="button small danger" data-action="remove-logo" style="margin-top:8px">Rimuovi logo</button>' : ''}</div>${company.logo ? `<img class="company-logo" src="${esc(company.logo)}" alt="Logo aziendale">` : ''}</div>
       </div>
     </section>
     <p class="footer-note">Il PDF cliente avrà l’intestazione aziendale sopra il riepilogo e, a seguire, le pagine generate dai moduli originali. Se un preventivo contiene più moduli, vengono inclusi tutti nello stesso PDF.</p>`;
+}
+
+function hasMeaningfulState(value = state) {
+  return Boolean(value?.clients?.length || value?.quotes?.length || Object.keys(value?.prices || {}).length || value?.company?.name || value?.company?.logo);
+}
+
+async function chooseDatabaseFolder() {
+  if (!desktopBridge) return;
+  const selection = await desktopBridge.choose_database_folder();
+  if (selection.cancelled) return;
+  if (selection.status === 'invalid') throw new Error(`Il database nella cartella selezionata non è valido: ${selection.error}`);
+  let mode = selection.status === 'existing' ? 'open' : 'empty';
+  if (selection.status === 'empty' && hasMeaningfulState()) {
+    mode = confirm('La cartella è vuota. Scegli OK per copiarvi i dati attualmente aperti; scegli Annulla per iniziare con un archivio vuoto.')
+      ? 'copy-current'
+      : 'empty';
+  }
+  if (storagePaths.database_dir && !databaseError) {
+    clearTimeout(saveTimer);
+    await saveQueue;
+    await desktopBridge.save_state(structuredClone(state));
+  }
+  const result = await desktopBridge.set_database_folder(selection.path, mode, mode === 'copy-current' ? structuredClone(state) : null);
+  state = result.state;
+  storagePaths = result.paths;
+  databaseError = '';
+  currentQuoteId = null;
+  currentPage = 'company';
+  render();
+  showToast(mode === 'copy-current' ? 'Database copiato nella nuova cartella.' : 'Cartella database selezionata.');
+}
+
+async function chooseOutputFolder(kind) {
+  if (!desktopBridge) return;
+  const result = await desktopBridge.choose_output_folder(kind);
+  if (result.cancelled) return;
+  storagePaths = result.paths;
+  if (currentPage === 'company') renderCompany();
+  showToast(`Cartella PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} salvata.`);
 }
 
 function renderQuote() {
@@ -385,10 +457,11 @@ function renderQuote() {
       </div>
       <aside class="card quote-side">
         <div class="card-head"><div><h2>${esc(quote.number)}</h2><p>Creato il ${dateLabel(quote.createdAt)}</p></div><span class="status ${quoteStatusClass(quote.status)}">${esc(quote.status || 'bozza')}</span></div>
-        <button class="button primary" data-action="generate-pdf">Anteprima / genera PDF</button>
+        <button class="button primary" data-action="generate-pdf" data-kind="customer">Genera PDF cliente completo</button>
+        <button class="button" data-action="generate-pdf" data-kind="supplier">Genera PDF fornitore · soli moduli</button>
         <button class="button" data-action="save-quote">Salva preventivo</button>
         <button class="button" data-action="back-quotes">Torna all’archivio</button>
-        <div class="footer-note">Il PDF comprende il riepilogo cliente con prezzi e sconti e le pagine dei moduli originali compilati.</div>
+        <div class="footer-note">Il PDF cliente include riepilogo e moduli. Quello fornitore contiene solo i moduli, con nome cliente e riferimento al preventivo.</div>
         ${!state.company.name ? '<p class="notice" style="margin-top:12px">Imposta i dati aziendali prima di generare il PDF cliente.</p>' : ''}
       </aside>
     </div>`;
@@ -642,7 +715,7 @@ async function handleLogoUpload(file) {
   showToast('Logo salvato nelle impostazioni locali.');
 }
 
-async function generateQuotePdf() {
+async function generateQuotePdf(kind = 'customer') {
   const quote = getQuote();
   if (!quote) return;
   const client = activeClient(quote);
@@ -650,7 +723,7 @@ async function generateQuotePdf() {
     showToast('Seleziona un cliente con nome o ragione sociale.', true);
     return;
   }
-  if (!state.company.name.trim()) {
+  if (kind === 'customer' && !state.company.name.trim()) {
     showToast('Inserisci il nome aziendale nelle impostazioni PDF.', true);
     return;
   }
@@ -658,7 +731,12 @@ async function generateQuotePdf() {
     showToast('Aggiungi almeno un modulo al preventivo.', true);
     return;
   }
-  if (quote.items.some(item => !(Number(item.price) > 0))) {
+  const outputFolder = kind === 'customer' ? storagePaths.customer_pdf_dir : storagePaths.supplier_pdf_dir;
+  if (desktopBridge && !outputFolder) {
+    showToast(`Scegli prima la cartella PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} nelle impostazioni.`, true);
+    return;
+  }
+  if (kind === 'customer' && quote.items.some(item => !(Number(item.price) > 0))) {
     showToast('Imposta un prezzo di listino maggiore di zero per ogni articolo.', true);
     return;
   }
@@ -667,15 +745,20 @@ async function generateQuotePdf() {
     if (resumeModuleItemId) {
       await pullActiveModule();
     }
-    showToast('Genero il PDF dai moduli originali…');
+    showToast(`Genero il PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} dai moduli originali…`);
     const modulePdfs = [];
     try {
       for (const item of quote.items) {
         const model = modules.find(entry => entry.id === item.moduleId);
         if (!model) throw new Error(`Modulo non trovato: ${item.moduleId}.`);
         const originalData = structuredClone(item.data || {});
+        const moduleData = {
+          ...originalData,
+          cliente: client.name || client.company || '',
+          riferimento: quote.number
+        };
         await loadModuleFrame(model);
-        await requestModule('set-data', { data: originalData });
+        await requestModule('set-data', { data: moduleData });
         try {
           const response = await requestModule('get-pdf');
           modulePdfs.push(response.bytes);
@@ -696,13 +779,32 @@ async function generateQuotePdf() {
         company: structuredClone(state.company),
         models: modules
       };
-      const response = await requestModule('build-quote-pdf', { payload, modulePdfs });
-      const blob = new Blob([response.bytes], { type: 'application/pdf' });
+      let bytes;
+      if (kind === 'customer') {
+        const response = await requestModule('build-quote-pdf', { payload, modulePdfs });
+        bytes = response.bytes;
+      } else {
+        const supplierBuilder = frame.contentWindow?.buildSupplierPdfDocument;
+        if (typeof supplierBuilder !== 'function') throw new Error('Generatore PDF fornitore non disponibile.');
+        bytes = await supplierBuilder(modulePdfs, quote.number, client.name || client.company || '');
+      }
+      generatedPdfBytes = bytes;
+      generatedPdfKind = kind;
+      const blob = new Blob([bytes], { type: 'application/pdf' });
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
       pdfUrl = URL.createObjectURL(blob);
       document.querySelector('#pdfPreview').src = pdfUrl;
+      document.querySelector('#pdfDialogTitle').textContent = kind === 'customer' ? 'Anteprima preventivo cliente' : 'Anteprima moduli fornitore';
+      document.querySelector('#pdfDialogEyebrow').textContent = kind === 'customer' ? 'DOCUMENTO CLIENTE' : 'DOCUMENTO FORNITORE';
       pdfDialog.showModal();
-      showToast('Anteprima PDF pronta.');
+      if (desktopBridge) {
+        const base64 = bytesToBase64(bytes);
+        const prefix = kind === 'customer' ? 'cliente' : 'fornitore';
+        const saved = await desktopBridge.write_pdf(kind, `preventivo_${quote.number}_${prefix}.pdf`, base64);
+        showToast(`PDF ${prefix} salvato: ${saved.path}`);
+      } else {
+        showToast(`Anteprima PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} pronta.`);
+      }
     } finally {
       if (resumeModuleItemId) {
         const activeItem = quote.items.find(item => item.id === resumeModuleItemId);
@@ -718,6 +820,16 @@ async function generateQuotePdf() {
   }
 }
 
+function bytesToBase64(bytes) {
+  const values = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < values.length; index += chunkSize) {
+    binary += String.fromCharCode(...values.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -729,31 +841,55 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-function exportBackup() {
+async function exportBackup() {
+  if (desktopBridge && (!storagePaths.database_dir || databaseError)) {
+    showToast(databaseError || 'Scegli prima la cartella del database locale.', true);
+    return;
+  }
   const payload = {
     formato: 'AREA_TENDA_GESTIONALE_BACKUP',
     versione: 1,
     esportatoIl: new Date().toISOString(),
     dati: state
   };
+  if (desktopBridge) {
+    const result = await desktopBridge.export_backup(JSON.stringify(payload));
+    if (result.cancelled) return;
+    showToast(`Backup esportato: ${result.path}`);
+    return;
+  }
   downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), `backup_preventivi_${new Date().toISOString().slice(0, 10)}.json`);
   showToast('Backup JSON esportato.');
 }
 
-async function importBackup(file) {
-  if (!file) return;
-  if (file.size > 50 * 1024 * 1024) throw new Error('Il file di backup supera il limite di 50 MB.');
-  const payload = JSON.parse(await file.text());
+async function restoreBackupPayload(payload) {
   if (payload?.formato !== 'AREA_TENDA_GESTIONALE_BACKUP' || payload.versione !== 1 ||
       !Array.isArray(payload.dati?.clients) || !Array.isArray(payload.dati?.quotes) ||
       !payload.dati?.prices || !payload.dati?.company) {
     throw new Error('Il file selezionato non è un backup valido del gestionale.');
   }
-  if (!confirm('Il ripristino sostituisce clienti, preventivi e impostazioni salvati in questo browser. Continuare?')) return;
+  if (desktopBridge && (!storagePaths.database_dir || databaseError)) {
+    throw new Error(databaseError || 'Scegli prima la cartella del database locale.');
+  }
+  if (!confirm('Il ripristino sostituisce clienti, preventivi e impostazioni salvati in questo database. Continuare?')) return;
   state = payload.dati;
   await persistNow();
   render();
   showToast('Backup ripristinato.');
+}
+
+async function importBackup(file) {
+  if (!file) return;
+  if (file.size > 50 * 1024 * 1024) throw new Error('Il file di backup supera il limite di 50 MB.');
+  await restoreBackupPayload(JSON.parse(await file.text()));
+}
+
+async function importBackupFromDesktop() {
+  if (!storagePaths.database_dir || databaseError) {
+    throw new Error(databaseError || 'Scegli prima la cartella del database locale.');
+  }
+  const result = await desktopBridge.import_backup();
+  if (!result.cancelled) await restoreBackupPayload(result.payload);
 }
 
 function removeQuote(id) {
@@ -776,6 +912,9 @@ function handleClick(event) {
   if (!button) return;
   const { action, id } = button.dataset;
   if (action === 'new-quote') newQuote();
+  else if (action === 'choose-database-folder') chooseDatabaseFolder().catch(error => showToast(error.message, true));
+  else if (action === 'choose-customer-folder') chooseOutputFolder('customer').catch(error => showToast(error.message, true));
+  else if (action === 'choose-supplier-folder') chooseOutputFolder('supplier').catch(error => showToast(error.message, true));
   else if (action === 'open-quote') {
     currentQuoteId = id;
     setPage('quote');
@@ -800,7 +939,7 @@ function handleClick(event) {
       persistNow();
       renderQuote();
     }
-  } else if (action === 'generate-pdf') generateQuotePdf();
+  } else if (action === 'generate-pdf') generateQuotePdf(button.dataset.kind || 'customer');
   else if (action === 'save-quote') {
     const quote = getQuote();
     if (quote) {
@@ -863,18 +1002,21 @@ moduleDialog.addEventListener('cancel', event => {
   event.preventDefault();
   closeModuleEditor();
 });
-document.querySelector('#backupExport').addEventListener('click', exportBackup);
-document.querySelector('#backupImport').addEventListener('click', () => document.querySelector('#backupFile').click());
+document.querySelector('#backupExport').addEventListener('click', () => exportBackup().catch(error => showToast(`Backup non esportato: ${error.message}`, true)));
+document.querySelector('#backupImport').addEventListener('click', () => {
+  if (desktopBridge) importBackupFromDesktop().catch(error => showToast(`Backup non importato: ${error.message}`, true));
+  else document.querySelector('#backupFile').click();
+});
 document.querySelector('#backupFile').addEventListener('change', event => {
   importBackup(event.target.files[0]).catch(error => showToast(`Backup non importato: ${error.message}`, true)).finally(() => { event.target.value = ''; });
 });
 document.querySelector('#pdfClose').addEventListener('click', () => pdfDialog.close());
 document.querySelector('#pdfDownload').addEventListener('click', () => {
-  if (!pdfUrl) return;
+  if (!pdfUrl || !generatedPdfBytes) return;
   const quote = getQuote();
   const link = document.createElement('a');
   link.href = pdfUrl;
-  link.download = `preventivo_${(quote?.number || 'cliente').replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+  link.download = `preventivo_${(quote?.number || 'cliente').replace(/[^a-zA-Z0-9_-]/g, '_')}_${generatedPdfKind}.pdf`;
   document.body.append(link);
   link.click();
   link.remove();
@@ -883,19 +1025,37 @@ pdfDialog.addEventListener('close', () => {
   document.querySelector('#pdfPreview').removeAttribute('src');
   if (pdfUrl) URL.revokeObjectURL(pdfUrl);
   pdfUrl = '';
+  generatedPdfBytes = null;
+  document.querySelector('#pdfDialogTitle').textContent = 'Anteprima preventivo';
+  document.querySelector('#pdfDialogEyebrow').textContent = 'DOCUMENTO CLIENTE';
 });
 
 async function init() {
   try {
-    if (!('indexedDB' in window)) throw new Error('Questo browser non supporta il database locale richiesto.');
     if (location.protocol === 'file:') throw new Error('Apri il gestionale con Avvia_gestionale.command: i moduli originali richiedono un’origine locale condivisa.');
-    [db, modules] = await Promise.all([openDatabase(), loadCatalog()]);
-    state = await readState() || emptyState();
+    desktopBridge = await waitForDesktopBridge();
+    if (desktopBridge) {
+      const [initial, catalog] = await Promise.all([desktopBridge.load_initial_data(), loadCatalog()]);
+      state = initial.state;
+      storagePaths = initial.paths || storagePaths;
+      databaseError = initial.database_error || '';
+      modules = catalog;
+    } else {
+      if (!('indexedDB' in window)) throw new Error('Questo browser non supporta il database locale richiesto.');
+      [db, modules] = await Promise.all([openDatabase(), loadCatalog()]);
+      state = await readState() || emptyState();
+    }
     state.clients ||= [];
     state.quotes ||= [];
     state.prices ||= {};
-    state.company ||= emptyState().company;
+    state.company = { ...emptyState().company, ...(state.company || {}) };
+    if (desktopBridge && (!storagePaths.database_dir || databaseError)) currentPage = 'company';
     render();
+    if (desktopBridge && !storagePaths.database_dir) {
+      setTimeout(() => chooseDatabaseFolder().catch(error => showToast(error.message, true)), 200);
+    } else if (databaseError) {
+      showToast(databaseError, true);
+    }
   } catch (error) {
     document.querySelector('#pageTitle').textContent = 'Avvio non riuscito';
     app.innerHTML = `<section class="card"><h2>Il gestionale non è pronto</h2><p class="client-detail">${esc(error.message)}</p><p class="footer-note">Avvia il server locale usando Avvia_gestionale.command. Nessun dato è stato inviato online.</p></section>`;

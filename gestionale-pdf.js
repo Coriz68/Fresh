@@ -113,6 +113,21 @@ window.buildQuotePdfDocument = async function (payload, modulePdfs) {
   return pdf.save();
 };
 
+window.buildSupplierPdfDocument = async function (modulePdfs, quoteNumber, clientName) {
+  const library = window.PDFLib;
+  if (!library?.PDFDocument) throw new Error('Libreria PDF non disponibile nel modulo originale.');
+  const pdf = await library.PDFDocument.create();
+  pdf.setTitle(`Moduli ${quoteNumber} - ${clientName}`);
+  pdf.setSubject(`Cliente: ${clientName} · Riferimento preventivo: ${quoteNumber}`);
+  for (const moduleBytes of modulePdfs) {
+    const modulePdf = await library.PDFDocument.load(new Uint8Array(moduleBytes));
+    const pages = await pdf.copyPages(modulePdf, modulePdf.getPageIndices());
+    pages.forEach(page => pdf.addPage(page));
+  }
+  if (!pdf.getPageCount()) throw new Error('Il preventivo non contiene pagine modulo.');
+  return pdf.save();
+};
+
 function pdfSafeText(value) {
   return String(value ?? '')
     .replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/…/g, '...')

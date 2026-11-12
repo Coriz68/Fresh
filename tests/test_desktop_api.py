@@ -43,6 +43,15 @@ class DesktopApiTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "existing")
 
+    def test_copy_current_database_uses_state_sent_by_desktop_frontend(self):
+        state = self.api.store.empty_state()
+        state["clients"].append({"id": "trial", "name": "Cliente prova"})
+
+        result = self.api.set_database_folder(str(self.database), "copy-current", state)
+
+        self.assertEqual(result["state"]["clients"][0]["name"], "Cliente prova")
+        self.assertEqual(self.api.store.load()["state"]["clients"][0]["name"], "Cliente prova")
+
     def test_cancelled_database_picker_does_not_change_path(self):
         self.api.window = FolderDialog(None)
 
@@ -50,6 +59,26 @@ class DesktopApiTests(unittest.TestCase):
 
         self.assertTrue(result["cancelled"])
         self.assertIsNone(self.api.store.load()["database_path"])
+
+    def test_startup_reports_corrupt_database_without_replacing_it(self):
+        database_file = self.database / "preventivi.json"
+        database_file.write_text("{damaged", encoding="utf-8")
+        self.api.store.settings["database_dir"] = str(self.database)
+        self.api.store._save_settings()
+
+        result = self.api.load_initial_data()
+
+        self.assertIn("database_error", result)
+        self.assertEqual(database_file.read_text(encoding="utf-8"), "{damaged")
+
+    def test_import_backup_rejects_files_over_50_mb(self):
+        backup = self.root / "oversized.json"
+        with backup.open("wb") as stream:
+            stream.truncate(50 * 1024 * 1024 + 1)
+        self.api.window = FolderDialog([str(backup)])
+
+        with self.assertRaisesRegex(ValueError, "50 MB"):
+            self.api.import_backup()
 
 
 if __name__ == "__main__":

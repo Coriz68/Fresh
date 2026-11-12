@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from datetime import date
 from pathlib import Path
 from typing import Any
 
-from local_store import DATABASE_FILENAME, LocalStore
+from local_store import LocalStore
 
 
 ROOT = Path(__file__).resolve().parent
@@ -25,7 +24,18 @@ class DesktopApi:
         self.window = window
 
     def load_initial_data(self) -> dict[str, Any]:
-        return self.store.load()
+        try:
+            result = self.store.load()
+            result["database_error"] = ""
+            return result
+        except (FileNotFoundError, ValueError) as error:
+            database_path = self.store.database_path
+            return {
+                "state": self.store.empty_state(),
+                "paths": self.store.paths,
+                "database_path": str(database_path) if database_path else None,
+                "database_error": str(error),
+            }
 
     def save_state(self, state: dict[str, Any]) -> dict[str, bool]:
         self.store.save(state)
@@ -37,9 +47,10 @@ class DesktopApi:
             return {"cancelled": True}
         return self.store.inspect_database_folder(selected)
 
-    def set_database_folder(self, path: str, mode: str) -> dict[str, Any]:
-        current_state = None
-        if mode == "copy-current":
+    def set_database_folder(
+        self, path: str, mode: str, current_state: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if mode == "copy-current" and current_state is None:
             current_state = self.store.load()["state"]
         return self.store.set_database_folder(path, mode, current_state)
 
@@ -73,8 +84,14 @@ class DesktopApi:
         selected = self._choose_open_file("JSON (*.json)")
         if not selected:
             return {"cancelled": True}
+        backup_path = Path(selected)
         try:
-            payload = json.loads(Path(selected).read_text(encoding="utf-8"))
+            if backup_path.stat().st_size > 50 * 1024 * 1024:
+                raise ValueError("Il file di backup supera il limite di 50 MB.")
+        except OSError as error:
+            raise ValueError(f"Impossibile leggere il backup selezionato: {error}") from error
+        try:
+            payload = json.loads(backup_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise ValueError(f"Impossibile leggere il backup selezionato: {error}") from error
         self._validate_backup(payload)
@@ -155,7 +172,7 @@ def main() -> None:
         min_size=(900, 640),
     )
     api.bind_window(window)
-    gui = "edgechromium" if os.name == "nt" else "cocoa" if sys.platform == "darwin" else None
+    gui = "edgechromium" if os.name == "nt" else None
     try:
         webview.start(gui=gui, debug=False)
     except Exception as error:

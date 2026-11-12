@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#12263a">
   <title>Gestionale preventivi</title>
   <link rel="stylesheet" href="gestionale.css">
+  <link rel="stylesheet" href="gestionale-desktop.css">
 </head>
 <body>
   <div class="shell">
@@ -53,9 +54,9 @@
   <dialog class="form-dialog" id="formDialog"></dialog>
   <dialog class="module-dialog pdf-dialog" id="pdfDialog">
     <div class="module-dialog-head">
-      <div><span class="eyebrow">DOCUMENTO CLIENTE</span><h2>Anteprima preventivo</h2></div>
+      <div><span class="eyebrow" id="pdfDialogEyebrow">DOCUMENTO CLIENTE</span><h2 id="pdfDialogTitle">Anteprima preventivo</h2></div>
       <div class="dialog-actions">
-        <button class="button primary" id="pdfDownload">Scarica PDF</button>
+        <button class="button primary" id="pdfDownload">Scarica una copia</button>
         <button class="icon-button" id="pdfClose" aria-label="Chiudi">×</button>
       </div>
     </div>

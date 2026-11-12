@@ -1,0 +1,33 @@
+.path-grid {
+  display: grid;
+  gap: 11px;
+}
+
+.path-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.path-control input {
+  min-width: 0;
+}
+
+.path-control button {
+  white-space: nowrap;
+}
+
+.storage-card {
+  margin-bottom: 14px;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 720px) {
+  .path-control {
+    grid-template-columns: 1fr;
+  }
+}

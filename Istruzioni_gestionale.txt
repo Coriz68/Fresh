@@ -1,17 +1,33 @@
-GESTIONALE PREVENTIVI — USO LOCALE
+GESTIONALE PREVENTIVI — VERSIONE DI PROVA DESKTOP
 
-AVVIO
-1. Su macOS, fai doppio clic su Avvia_gestionale.command. Se macOS mostra un avviso, autorizza l'apertura del file.
-2. Si apre il gestionale nel browser. Lascia aperta la finestra Terminale mentre lo usi; Ctrl+C arresta il server locale.
-3. Usa sempre lo stesso browser e lo stesso profilo per ritrovare i dati. Il server ascolta solo su questo computer.
+REQUISITI
+- Python 3 installato sul computer.
+- Connessione internet solo al primo avvio, per installare pywebview nella cartella .venv.
+- Su Windows è necessario il runtime WebView2 (normalmente presente in Windows 10/11 aggiornato).
 
-PREVENTIVI
-1. Registra i clienti e configura i dati aziendali, il logo e le note del PDF.
-2. Inserisci il listino dalla sezione dedicata; nel singolo preventivo puoi definire quantità e sconto per ogni modulo.
-3. Crea un preventivo, seleziona il cliente e aggiungi uno o più moduli. “Apri modulo originale” apre la scheda originale per la compilazione.
-4. Salva il preventivo. L'anteprima/generazione crea un PDF unico con riepilogo, prezzi e sconti, seguito dai PDF originali compilati.
-5. Se manca un campo obbligatorio del modulo o un prezzo, il gestionale segnala il problema e non genera un preventivo incompleto.
+AVVIO SU MAC
+1. Fai doppio clic su Avvia_gestionale.command. Se macOS lo blocca, usa il menu contestuale > Apri.
+2. Al primo avvio viene creata la cartella .venv e installata la dipendenza desktop; gli avvii successivi aprono direttamente la finestra.
+3. Si apre una finestra desktop. Chiudi la finestra per terminare il programma.
 
-DATI E BACKUP
-Clienti, listino, impostazioni e preventivi vengono salvati nell'archivio IndexedDB del browser su questo computer; non vengono inviati a un server remoto. Esporta periodicamente un backup JSON e custodiscilo in un luogo sicuro. Il ripristino sostituisce i dati presenti nel browser.
-Questa versione locale non sincronizza più computer e non cifra i dati dell'applicazione: proteggi l'accesso al tuo account del computer e al profilo del browser.
+AVVIO SU WINDOWS
+1. Installa Python 3 e WebView2, se non sono già presenti.
+2. Fai doppio clic su Avvia_gestionale_windows.bat.
+3. Al primo avvio vengono installati i componenti necessari in .venv; gli avvii successivi aprono direttamente la finestra.
+
+PRIMO AVVIO E ARCHIVIAZIONE
+1. Apri Azienda e PDF e scegli una cartella locale per il database. Il file si chiama preventivi.json.
+2. Se la cartella scelta contiene già un database valido, il gestionale lo apre. Se è vuota e hai dati già aperti, scegli se copiarli o iniziare da zero.
+3. Scegli due cartelle PDF distinte: una per i clienti e una per il fornitore.
+4. Configura ragione sociale, contatti, logo, IVA e listino; salva le impostazioni.
+5. Il database è JSON in chiaro sul disco scelto. Esporta regolarmente un backup e proteggi l’accesso al computer.
+
+PREVENTIVI E PDF
+1. Crea o seleziona un cliente, aggiungi i moduli e compila ciascun modulo originale.
+2. “Genera PDF cliente completo” crea un documento con riepilogo, dati aziendali e cliente, prezzi, sconti, IVA, note e tutti i moduli. Ogni modulo riporta il nome del cliente e il numero del preventivo.
+3. “Genera PDF fornitore · soli moduli” crea il PDF con le pagine originali dei moduli, senza riepilogo commerciale e senza prezzi; i moduli riportano nome cliente e numero preventivo.
+4. Ogni PDF viene salvato nella cartella scelta per la relativa destinazione. Se un file con lo stesso nome esiste già, viene creato un nome con suffisso numerico.
+5. La finestra di anteprima permette anche di scaricare una copia.
+
+PROVA E LIMITI
+Questa è una versione di sviluppo da verificare prima di preparare un installer Windows. Non è ancora un file eseguibile autonomo: il codice sorgente richiede Python e il runtime WebView2 su Windows. La versione Mac serve per provare funzioni, dati e PDF; la verifica finale su Windows va eseguita su un computer Windows.
