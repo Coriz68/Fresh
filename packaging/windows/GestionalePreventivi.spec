@@ -2,7 +2,7 @@
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
-root = Path(SPECPATH).resolve()
+root = Path(SPECPATH).resolve().parents[1]
 data_files = []
 
 for relative in (
