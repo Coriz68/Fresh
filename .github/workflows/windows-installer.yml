@@ -45,9 +45,11 @@ jobs:
         run: |
           $app = Resolve-Path "dist/GestionalePreventivi"
           if (-not (Test-Path "$app/GestionalePreventivi.exe")) { throw "Eseguibile non trovato" }
-          if ((Get-ChildItem "$app/Moduli" -Filter *.html).Count -ne 32) { throw "Numero moduli HTML inatteso" }
+          $contents = Join-Path $app "_internal"
+          if (-not (Test-Path $contents)) { throw "Cartella dati PyInstaller mancante" }
+          if ((Get-ChildItem "$contents/Moduli" -Filter *.html).Count -ne 32) { throw "Numero moduli HTML inatteso" }
           foreach ($file in @("Gestione_preventivi.html", "Apri_catalogo.html", "gestionale.js", "gestionale-pdf.js", "Disegni/Sezione_H1_H2.jpeg", "Logo_BN_Trasp_HD.png")) {
-            if (-not (Test-Path "$app/$file")) { throw "File applicativo mancante: $file" }
+            if (-not (Test-Path "$contents/$file")) { throw "File applicativo mancante: $file" }
           }
 
       - name: Installa Inno Setup
