@@ -1,0 +1,11 @@
+MODULI D’ORDINE AREA TENDA — MAC
+1. Estrai tutto lo ZIP. Apri Apri_catalogo.html in Safari o Chrome e scegli la scheda. Puoi anche aprire direttamente ciascun HTML nella cartella Moduli. Funziona offline.
+2. Scrivi nelle aree azzurre e clicca sulle caselle o sulle posizioni indicate nel disegno. Un secondo clic annulla la scelta. “Dimensione 100%” agevola la compilazione dei dettagli.
+3. Inserisci tutte le misure in centimetri, anche sui modelli Aliante. Ad esempio, per 3,50 metri scrivi 350. Puoi usare la virgola per i decimali. Le quote ripetute della stessa dimensione si aggiornano insieme. Compila ciascuna campata e la quota totale secondo il disegno.
+4. “Salva dati” scarica il JSON dell’ordine. Per modificarlo apri lo stesso modello e scegli “Apri dati”. Il T4 accetta anche il precedente JSON T4 in millimetri e converte le misure in centimetri.
+5. “Scarica PDF” produce una pagina A4 orizzontale con l’immagine originale e i dati. “Stampa” apre l’anteprima di stampa. Se necessario seleziona A4 orizzontale e disattiva intestazioni e piè di pagina.
+
+Il catalogo comprende 14 moduli Aliante, 12 Antares, 5 Andromeda e un modulo per tende da sole. I due disegni di sezione separati sono consultabili dal catalogo.
+
+ORDINE FINO A QUATTRO TENDE DA SOLE
+Compila una riga per ogni configurazione. La casella Pz. indica quante tende ordinare con quei dati. Larghezza, altezza o sporgenza, altezza mantovana e lunghezza asta sono in centimetri. Per colore armatura, bordino o asta personalizzati puoi scrivere direttamente nel campo accanto alla casella. Salva il JSON per riaprire l’ordine nel catalogo. Il PDF esportato resta compilabile anche in un lettore PDF che supporta i moduli. Le modifiche fatte direttamente al PDF si conservano nel PDF.

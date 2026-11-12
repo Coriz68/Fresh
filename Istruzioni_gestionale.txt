@@ -1,0 +1,17 @@
+GESTIONALE PREVENTIVI — USO LOCALE
+
+AVVIO
+1. Su macOS, fai doppio clic su Avvia_gestionale.command. Se macOS mostra un avviso, autorizza l'apertura del file.
+2. Si apre il gestionale nel browser. Lascia aperta la finestra Terminale mentre lo usi; Ctrl+C arresta il server locale.
+3. Usa sempre lo stesso browser e lo stesso profilo per ritrovare i dati. Il server ascolta solo su questo computer.
+
+PREVENTIVI
+1. Registra i clienti e configura i dati aziendali, il logo e le note del PDF.
+2. Inserisci il listino dalla sezione dedicata; nel singolo preventivo puoi definire quantità e sconto per ogni modulo.
+3. Crea un preventivo, seleziona il cliente e aggiungi uno o più moduli. “Apri modulo originale” apre la scheda originale per la compilazione.
+4. Salva il preventivo. L'anteprima/generazione crea un PDF unico con riepilogo, prezzi e sconti, seguito dai PDF originali compilati.
+5. Se manca un campo obbligatorio del modulo o un prezzo, il gestionale segnala il problema e non genera un preventivo incompleto.
+
+DATI E BACKUP
+Clienti, listino, impostazioni e preventivi vengono salvati nell'archivio IndexedDB del browser su questo computer; non vengono inviati a un server remoto. Esporta periodicamente un backup JSON e custodiscilo in un luogo sicuro. Il ripristino sostituisce i dati presenti nel browser.
+Questa versione locale non sincronizza più computer e non cifra i dati dell'applicazione: proteggi l'accesso al tuo account del computer e al profilo del browser.

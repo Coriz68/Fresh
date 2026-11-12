@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#12263a">
+  <title>Gestionale preventivi</title>
+  <link rel="stylesheet" href="gestionale.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" data-page="dashboard"><span class="brand-mark">P</span><span>Preventivi</span></a>
+      <p class="nav-caption">GESTIONE</p>
+      <button class="nav-item active" data-page="dashboard">▦ <span>Dashboard</span></button>
+      <button class="nav-item" data-page="quotes">▤ <span>Preventivi</span><span class="nav-count" id="quoteCount"></span></button>
+      <button class="nav-item" data-page="clients">♙ <span>Clienti</span></button>
+      <p class="nav-caption">CONFIGURAZIONE</p>
+      <button class="nav-item" data-page="prices">▧ <span>Listino articoli</span></button>
+      <button class="nav-item" data-page="company">⚙ <span>Azienda e PDF</span></button>
+      <div class="side-bottom">
+        <button class="nav-item" id="backupExport">⇧ <span>Esporta backup</span></button>
+        <button class="nav-item" id="backupImport">⇩ <span>Ripristina backup</span></button>
+        <input id="backupFile" type="file" accept=".json,application/json" hidden>
+        <p class="local-note">Dati conservati su questo computer</p>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="breadcrumbs" id="breadcrumbs">Gestionale</div>
+          <h1 id="pageTitle">Dashboard</h1>
+        </div>
+        <div class="top-actions">
+          <span class="local-badge"><i></i> Locale</span>
+          <button class="button primary" id="newQuoteTop">＋ Nuovo preventivo</button>
+        </div>
+      </header>
+      <div id="app" aria-live="polite"></div>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <dialog class="module-dialog" id="moduleDialog">
+    <div class="module-dialog-head">
+      <div><span class="eyebrow">MODULO ORIGINALE</span><h2 id="moduleDialogTitle">Compila modulo</h2></div>
+      <div class="dialog-actions">
+        <button class="button" id="moduleSave">Salva modulo</button>
+        <button class="icon-button" id="moduleClose" aria-label="Chiudi">×</button>
+      </div>
+    </div>
+    <iframe id="moduleFrame" title="Modulo d’ordine originale"></iframe>
+  </dialog>
+  <dialog class="form-dialog" id="formDialog"></dialog>
+  <dialog class="module-dialog pdf-dialog" id="pdfDialog">
+    <div class="module-dialog-head">
+      <div><span class="eyebrow">DOCUMENTO CLIENTE</span><h2>Anteprima preventivo</h2></div>
+      <div class="dialog-actions">
+        <button class="button primary" id="pdfDownload">Scarica PDF</button>
+        <button class="icon-button" id="pdfClose" aria-label="Chiudi">×</button>
+      </div>
+    </div>
+    <iframe id="pdfPreview" title="Anteprima PDF preventivo"></iframe>
+  </dialog>
+  <script src="gestionale.js"></script>
+</body>
+</html>
