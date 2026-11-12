@@ -21,7 +21,7 @@ for folder in ("Moduli", "Disegni"):
         if source.is_file():
             data_files.append((str(source), str(source.parent.relative_to(root))))
 
-data_files.append((str(root / "Logo B\\N Trasp HD.png"), "."))
+data_files.append((str(root / "Logo_BN_Trasp_HD.png"), "."))
 
 a = Analysis(
     [str(root / "desktop_app.py")],
