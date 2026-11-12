@@ -528,7 +528,8 @@ function openAddModuleDialog() {
     quote.updatedAt = new Date().toISOString();
     await persistNow();
     renderQuote();
-    openModuleEditor(quote.items.at(-1).id);
+    formDialog.close();
+    await openModuleEditor(quote.items.at(-1).id);
   });
 }
 
