@@ -1,4 +1,4 @@
-# Gestionale Preventivi 1.0.1 — installazione Windows
+# Gestionale Preventivi 1.0.2 — installazione Windows
 
 ## Requisiti
 
@@ -8,7 +8,7 @@
 
 ## Installazione
 
-1. Scarica `Gestionale Preventivi 1.0.1 Setup.exe` e `SHA256SUMS.txt` dall'artefatto Windows x64 della build.
+1. Scarica `Gestionale Preventivi 1.0.2 Setup.exe` e `SHA256SUMS.txt` dall'artefatto Windows x64 della build.
 2. Confronta l'hash SHA-256 del setup con quello riportato nel file.
 3. Avvia il setup. Windows può segnalare che l'app è di un autore sconosciuto: l'eseguibile non è firmato digitalmente.
 4. Segui la procedura guidata e avvia il gestionale dal menu Start.
@@ -17,6 +17,6 @@ Il setup installa il programma in Program Files e crea la voce di disinstallazio
 
 ## Ottenere il pacchetto
 
-La build si esegue su GitHub Actions Windows x64. Apri l'esecuzione completata del workflow **Windows installer 1.0** e scarica l'artefatto `Gestionale-Preventivi-1.0.1-Windows-x64`. L'artefatto contiene il setup, il checksum e queste istruzioni.
+La build si esegue su GitHub Actions Windows x64. Apri l'esecuzione completata del workflow **Windows installer 1.0** e scarica l'artefatto `Gestionale-Preventivi-1.0.2-Windows-x64`. L'artefatto contiene il setup, il checksum e queste istruzioni.
 
 Per distribuire un setup, verifica anche l'installazione e l'avvio su un computer Windows 10/11 reale. L'hash rileva modifiche accidentali, ma non sostituisce una firma digitale.
