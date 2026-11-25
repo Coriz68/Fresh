@@ -1,12 +1,12 @@
-# Gestionale preventivi — versione 1.0.0
+# Gestionale preventivi — versione 1.0.1
 
-Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
+Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0.1 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
 
 ## Requisiti
 
 - Python 3 installato.
 - Connessione Internet solo al primo avvio, quando viene installato `pywebview` nell’ambiente `.venv` del progetto.
-- Windows 10/11: WebView2 Runtime. Sui sistemi aggiornati è normalmente già disponibile.
+- Windows 10/11: WebView2 Runtime. Il setup Windows lo installa automaticamente se manca e in quel caso richiede Internet.
 
 ## Avvio
 
@@ -22,7 +22,7 @@ Il progetto include la configurazione per creare il setup Windows x64 `Gestional
 2. Avvia `Avvia_gestionale_windows.bat`.
 3. Al primo avvio vengono creati `.venv` e i componenti Python. Gli avvii successivi aprono direttamente la finestra.
 
-Il setup per la distribuzione installa invece l'applicazione autonoma; richiede Microsoft Edge WebView2 Evergreen Runtime.
+Il setup per la distribuzione installa invece l'applicazione autonoma. Se Microsoft Edge WebView2 Evergreen Runtime manca, il setup lo installa automaticamente tramite il bootstrapper ufficiale Microsoft; in quel caso serve una connessione Internet.
 
 Il progetto deve restare nella sua cartella: i moduli HTML originali e i relativi file grafici sono caricati localmente. La cartella `.venv` contiene solo dipendenze di sviluppo e può essere ricreata dal launcher.
 

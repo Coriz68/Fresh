@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from datetime import date
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -174,18 +177,25 @@ def main() -> None:
             "Manca pywebview. Segui README_WINDOWS_MAC.md per installare le dipendenze e avviare il gestionale."
         ) from error
 
-    api = DesktopApi()
-    window = webview.create_window(
-        APP_TITLE,
-        url=(ROOT / "Gestione_preventivi.html").resolve().as_uri(),
-        js_api=api,
-        width=1440,
-        height=920,
-        min_size=(900, 640),
-    )
-    api.bind_window(window)
-    gui = "edgechromium" if os.name == "nt" else None
+    # Serve the bundled source files from loopback. The original module catalog
+    # and its images use fetch(), which browsers block when opened from file://.
+    handler = partial(SimpleHTTPRequestHandler, directory=str(ROOT))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/Gestione_preventivi.html"
     try:
+        api = DesktopApi()
+        window = webview.create_window(
+            APP_TITLE,
+            url=url,
+            js_api=api,
+            width=1440,
+            height=920,
+            min_size=(900, 640),
+        )
+        api.bind_window(window)
+        gui = "edgechromium" if os.name == "nt" else None
         webview.start(gui=gui, debug=False)
     except Exception as error:
         raise SystemExit(
@@ -193,6 +203,10 @@ def main() -> None:
             "o che il backend WebKit sia disponibile su macOS. "
             f"Dettaglio: {error}"
         ) from error
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=2)
 
 
 if __name__ == "__main__":

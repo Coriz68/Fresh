@@ -1,5 +1,5 @@
 #define AppName "Gestionale Preventivi"
-#define AppVersion "1.0.0"
+#define AppVersion "1.0.1"
 #define AppExeName "GestionalePreventivi.exe"
 
 [Setup]
@@ -10,7 +10,7 @@ AppPublisher=Area Tenda
 DefaultDirName={autopf}\Gestionale Preventivi
 DefaultGroupName={#AppName}
 OutputDir=..\..\dist-installer
-OutputBaseFilename=Gestionale Preventivi 1.0 Setup
+OutputBaseFilename=Gestionale Preventivi 1.0.1 Setup
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=admin
@@ -29,6 +29,7 @@ Name: "desktopicon"; Description: "Crea un collegamento sul desktop"; GroupDescr
 
 [Files]
 Source: "..\..\dist\GestionalePreventivi\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "MicrosoftEdgeWebView2Setup.exe"; Flags: dontcopy
 
 [Icons]
 Name: "{group}\Gestionale Preventivi"; Filename: "{app}\{#AppExeName}"
@@ -58,10 +59,20 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ExitCode: Integer;
 begin
   Result := '';
   if not IsWebView2Installed then
-    Result := 'Per avviare il gestionale è necessario Microsoft Edge WebView2 Runtime.' + #13#10 + #13#10 +
-      'Installa il runtime Evergreen dal sito Microsoft, quindi riavvia il setup:' + #13#10 +
-      'https://developer.microsoft.com/microsoft-edge/webview2/';
+  begin
+    WizardForm.StatusLabel.Caption := 'Installazione del componente Microsoft WebView2...';
+    WizardForm.Update;
+    ExtractTemporaryFile('MicrosoftEdgeWebView2Setup.exe');
+    if not Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebView2Setup.exe'), '/silent /install', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+      Result := 'Non è stato possibile avviare l’installazione di Microsoft WebView2.' + #13#10 + #13#10 +
+        'Riprova come amministratore e verifica la connessione Internet.'
+    else if not IsWebView2Installed then
+      Result := 'Microsoft WebView2 non è stato installato (codice ' + IntToStr(ExitCode) + ').' + #13#10 + #13#10 +
+        'Verifica la connessione Internet e riprova. Il programma non è stato installato.';
+  end;
 end;
