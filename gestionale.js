@@ -4,6 +4,7 @@ const DB_NAME = 'area-tenda-preventivi';
 const DB_VERSION = 1;
 const STORE_NAME = 'appState';
 const CHANNEL = 'area-tenda-quote-manager';
+const DESKTOP_MODE = new URLSearchParams(location.search).get('desktop') === '1';
 const app = document.querySelector('#app');
 const frame = document.querySelector('#moduleFrame');
 const moduleDialog = document.querySelector('#moduleDialog');
@@ -23,11 +24,13 @@ let activeModuleItemId = null;
 let pendingRequests = new Map();
 let saveQueue = Promise.resolve();
 let saveTimer;
+let lastSaveError = null;
 let modulePullTimer;
 let toastTimer;
 let pdfUrl = '';
 let generatedPdfBytes = null;
 let generatedPdfKind = 'customer';
+let pdfGenerationActive = false;
 
 const emptyState = () => ({
   clients: [],
@@ -84,6 +87,13 @@ function showToast(message, isError = false) {
   toastTimer = setTimeout(() => toast.classList.remove('show'), 4200);
 }
 
+function showPdfProgress(message) {
+  toast.textContent = message;
+  toast.classList.remove('error');
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+}
+
 function openDatabase() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -104,8 +114,9 @@ async function waitForDesktopBridge() {
     return typeof candidate?.load_initial_data === 'function' ? candidate : null;
   };
   if (api()) return api();
+  if (!DESKTOP_MODE) return null;
   await new Promise(resolve => {
-    const timeout = setTimeout(resolve, 1500);
+    const timeout = setTimeout(resolve, 15000);
     window.addEventListener('pywebviewready', () => {
       clearTimeout(timeout);
       resolve();
@@ -134,22 +145,44 @@ function writeState(snapshot) {
 
 function persistSoon() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => persistNow(), 350);
+  saveTimer = setTimeout(() => { void persistNow(); }, 350);
 }
 
 function persistNow() {
   clearTimeout(saveTimer);
+  if (!state) return Promise.resolve(false);
   const snapshot = structuredClone(state);
   if (desktopBridge && (!storagePaths.database_dir || databaseError)) {
-    showToast(databaseError || 'Scegli prima la cartella del database locale.', true);
-    return Promise.resolve();
+    lastSaveError = new Error(databaseError || 'Scegli prima la cartella del database locale.');
+    showToast(lastSaveError.message, true);
+    return Promise.resolve(false);
   }
-  saveQueue = saveQueue
+  const pendingSave = saveQueue
     .catch(() => undefined)
-    .then(() => desktopBridge ? desktopBridge.save_state(snapshot) : writeState(snapshot))
-    .catch(error => showToast(`Errore di salvataggio: ${error.message}`, true));
+    .then(() => desktopBridge ? desktopBridge.save_state(snapshot) : writeState(snapshot));
+  saveQueue = pendingSave.then(() => {
+    lastSaveError = null;
+    return true;
+  }).catch(error => {
+    lastSaveError = error;
+    showToast(`Errore di salvataggio: ${error.message}`, true);
+    return false;
+  });
   return saveQueue;
 }
+
+window.flushDesktopBeforeClose = async () => {
+  clearTimeout(saveTimer);
+  if (!DESKTOP_MODE || !desktopBridge || !state) return true;
+  if (!storagePaths.database_dir || databaseError) {
+    if (hasMeaningfulState()) {
+      showToast(databaseError || 'Scegli una cartella database prima di chiudere: i dati non sono ancora salvati.', true);
+      return false;
+    }
+    return true;
+  }
+  return persistNow();
+};
 
 async function loadCatalog() {
   const response = await fetch('Apri_catalogo.html');
@@ -264,7 +297,7 @@ function renderDashboard() {
   const latest = [...state.quotes].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 6);
   app.innerHTML = `
     <div class="stat-grid">
-      <section class="card stat"><div class="stat-label">Preventivi totali</div><div class="stat-value">${state.quotes.length}</div><div class="stat-foot">Salvati in questo browser</div></section>
+      <section class="card stat"><div class="stat-label">Preventivi totali</div><div class="stat-value">${state.quotes.length}</div><div class="stat-foot">${desktopBridge ? 'Salvati sul disco locale' : 'Salvati in questo browser'}</div></section>
       <section class="card stat"><div class="stat-label">In lavorazione</div><div class="stat-value">${openQuotes}</div><div class="stat-foot">Bozze e preventivi inviati</div></section>
       <section class="card stat"><div class="stat-label">Clienti registrati</div><div class="stat-value">${totalClients}</div><div class="stat-foot">Anagrafiche disponibili</div></section>
     </div>
@@ -281,7 +314,7 @@ function renderDashboard() {
         <div class="stack">
           <div><span class="badge">${state.company.name ? 'Completato' : 'Da configurare'}</span><p class="client-detail"><a class="module-link" href="#" data-page="company">Dati aziendali, intestazione e note PDF →</a></p></div>
           <div><span class="badge">${Object.keys(state.prices).length ? 'Iniziato' : 'Da configurare'}</span><p class="client-detail"><a class="module-link" href="#" data-page="prices">Inserisci i prezzi di listino dei moduli →</a></p></div>
-          <div class="footer-note">Il gestionale non usa servizi cloud: clienti, preventivi e impostazioni restano nel database del browser su questo computer. Esporta periodicamente un backup.</div>
+          <div class="footer-note">${desktopBridge ? 'Il gestionale non usa servizi cloud: clienti, preventivi e impostazioni restano nel database locale scelto.' : 'Il gestionale non usa servizi cloud: clienti, preventivi e impostazioni restano nel database del browser su questo computer.'} Esporta periodicamente un backup.</div>
         </div>
       </section>
     </div>`;
@@ -391,9 +424,7 @@ async function chooseDatabaseFolder() {
       : 'empty';
   }
   if (storagePaths.database_dir && !databaseError) {
-    clearTimeout(saveTimer);
-    await saveQueue;
-    await desktopBridge.save_state(structuredClone(state));
+    if (!await persistNow()) throw new Error('Impossibile salvare i dati nella cartella database attuale. La cartella non è stata cambiata.');
   }
   const result = await desktopBridge.set_database_folder(selection.path, mode, mode === 'copy-current' ? structuredClone(state) : null);
   state = result.state;
@@ -715,7 +746,7 @@ async function handleLogoUpload(file) {
     reader.onerror = () => reject(new Error('Non riesco a leggere il file del logo.'));
     reader.readAsDataURL(file);
   });
-  await persistNow();
+  if (!await persistNow()) return;
   renderCompany();
   showToast('Logo salvato nelle impostazioni locali.');
 }
@@ -745,15 +776,22 @@ async function generateQuotePdf(kind = 'customer') {
     showToast('Imposta un prezzo di listino maggiore di zero per ogni articolo.', true);
     return;
   }
+  if (pdfGenerationActive) {
+    showToast('La generazione di un PDF è già in corso. Attendi il completamento.', true);
+    return;
+  }
+  pdfGenerationActive = true;
+  document.querySelectorAll('[data-action="generate-pdf"]').forEach(button => { button.disabled = true; });
   const resumeModuleItemId = moduleDialog.open ? activeModuleItemId : null;
   try {
     if (resumeModuleItemId) {
       await pullActiveModule();
     }
-    showToast(`Genero il PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} dai moduli originali…`);
+    showPdfProgress(`Preparo il PDF ${kind === 'customer' ? 'cliente' : 'fornitore'}…`);
     const modulePdfs = [];
     try {
-      for (const item of quote.items) {
+      for (let index = 0; index < quote.items.length; index++) {
+        const item = quote.items[index];
         const model = modules.find(entry => entry.id === item.moduleId);
         if (!model) throw new Error(`Modulo non trovato: ${item.moduleId}.`);
         const originalData = structuredClone(item.data || {});
@@ -765,6 +803,7 @@ async function generateQuotePdf(kind = 'customer') {
         await loadModuleFrame(model);
         await requestModule('set-data', { data: moduleData });
         try {
+          showPdfProgress(`Creo il PDF del modulo ${index + 1} di ${quote.items.length}: ${model.name}…`);
           const response = await requestModule('get-pdf');
           modulePdfs.push(response.bytes);
         } finally {
@@ -786,9 +825,11 @@ async function generateQuotePdf(kind = 'customer') {
       };
       let bytes;
       if (kind === 'customer') {
+        showPdfProgress('Compongo il riepilogo commerciale e unisco i moduli…');
         const response = await requestModule('build-quote-pdf', { payload, modulePdfs });
         bytes = response.bytes;
       } else {
+        showPdfProgress('Unisco le pagine dei moduli…');
         const supplierBuilder = frame.contentWindow?.buildSupplierPdfDocument;
         if (typeof supplierBuilder !== 'function') throw new Error('Generatore PDF fornitore non disponibile.');
         bytes = await supplierBuilder(modulePdfs, quote.number, client.name || client.company || '');
@@ -803,6 +844,7 @@ async function generateQuotePdf(kind = 'customer') {
       document.querySelector('#pdfDialogEyebrow').textContent = kind === 'customer' ? 'DOCUMENTO CLIENTE' : 'DOCUMENTO FORNITORE';
       pdfDialog.showModal();
       if (desktopBridge) {
+        showPdfProgress('Salvo il PDF nella cartella configurata…');
         const base64 = bytesToBase64(bytes);
         const prefix = kind === 'customer' ? 'cliente' : 'fornitore';
         const saved = await desktopBridge.write_pdf(kind, `preventivo_${quote.number}_${prefix}.pdf`, base64);
@@ -822,6 +864,9 @@ async function generateQuotePdf(kind = 'customer') {
     }
   } catch (error) {
     showToast(`PDF non generato: ${error.message}`, true);
+  } finally {
+    pdfGenerationActive = false;
+    document.querySelectorAll('[data-action="generate-pdf"]').forEach(button => { button.disabled = false; });
   }
 }
 
@@ -949,20 +994,20 @@ function handleClick(event) {
     const quote = getQuote();
     if (quote) {
       quote.updatedAt = new Date().toISOString();
-      persistNow();
-      showToast('Preventivo salvato.');
+      void persistNow().then(saved => { if (saved) showToast('Preventivo salvato.'); });
     }
   } else if (action === 'save-prices') {
-    persistNow();
-    showToast('Listino salvato.');
+    void persistNow().then(saved => { if (saved) showToast('Listino salvato.'); });
   } else if (action === 'save-company') {
-    persistNow();
-    showToast('Impostazioni aziendali salvate.');
+    void persistNow().then(saved => { if (saved) showToast('Impostazioni aziendali salvate.'); });
   } else if (action === 'remove-logo') {
     state.company.logo = '';
-    persistNow();
-    renderCompany();
-    showToast('Logo rimosso.');
+    void persistNow().then(saved => {
+      if (saved) {
+        renderCompany();
+        showToast('Logo rimosso.');
+      }
+    });
   }
 }
 
@@ -1055,6 +1100,7 @@ async function init() {
   try {
     if (location.protocol === 'file:') throw new Error('Apri il gestionale con Avvia_gestionale.command: i moduli originali richiedono un’origine locale condivisa.');
     desktopBridge = await waitForDesktopBridge();
+    if (DESKTOP_MODE && !desktopBridge) throw new Error('Il collegamento al database locale non è pronto. Chiudi e riapri il gestionale; i dati non sono stati salvati nel browser.');
     if (desktopBridge) {
       const [initial, catalog] = await Promise.all([desktopBridge.load_initial_data(), loadCatalog()]);
       state = initial.state;

@@ -12,6 +12,7 @@ test('attende pywebviewready prima di restituire l’API desktop', async () => {
   const listeners = {};
   const api = {};
   const sandbox = {
+    DESKTOP_MODE: true,
     window: {
       pywebview: { api },
       addEventListener: (name, listener) => { listeners[name] = listener; }

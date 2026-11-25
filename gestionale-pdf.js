@@ -155,8 +155,18 @@ function pdfSafeText(value) {
 
 function fitPdfText(text, font, size, maxWidth) {
   let value = pdfSafeText(text);
-  while (value.length > 1 && font.widthOfTextAtSize(value, size) > maxWidth) value = `${value.slice(0, -2)}...`;
-  return value;
+  if (font.widthOfTextAtSize(value, size) <= maxWidth) return value;
+  const suffix = '...';
+  if (font.widthOfTextAtSize(suffix, size) > maxWidth) return '';
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const candidate = `${value.slice(0, middle).trimEnd()}${suffix}`;
+    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) low = middle;
+    else high = middle - 1;
+  }
+  return `${value.slice(0, low).trimEnd()}${suffix}`;
 }
 
 function money(value) {

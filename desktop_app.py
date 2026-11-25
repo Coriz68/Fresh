@@ -183,7 +183,7 @@ def main() -> None:
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
-    url = f"http://127.0.0.1:{server.server_address[1]}/Gestione_preventivi.html"
+    url = f"http://127.0.0.1:{server.server_address[1]}/Gestione_preventivi.html?desktop=1"
     try:
         api = DesktopApi()
         window = webview.create_window(
@@ -195,6 +195,32 @@ def main() -> None:
             min_size=(900, 640),
         )
         api.bind_window(window)
+
+        close_state = {"allowed": False, "pending": False}
+
+        def finish_close(saved: Any) -> None:
+            close_state["pending"] = False
+            if saved:
+                close_state["allowed"] = True
+                window.destroy()
+
+        def flush_before_close() -> bool:
+            if close_state["allowed"]:
+                return True
+            if close_state["pending"]:
+                return False
+            close_state["pending"] = True
+            try:
+                window.evaluate_js(
+                    "window.flushDesktopBeforeClose ? window.flushDesktopBeforeClose() : true",
+                    callback=finish_close,
+                )
+            except Exception:
+                close_state["pending"] = False
+                return True
+            return False
+
+        window.events.closing += flush_before_close
         gui = "edgechromium" if os.name == "nt" else None
         webview.start(gui=gui, debug=False)
     except Exception as error:

@@ -9,8 +9,9 @@ const pdfSource = fs.readFileSync(new URL('../gestionale-pdf.js', `file://${__di
 
 function makePdfHarness() {
   const pages = [];
+  let textMeasureCalls = 0;
   const logoSize = { width: 2048, height: 2048 };
-  const regular = { widthOfTextAtSize: (text, size) => text.length * size * 0.5 };
+  const regular = { widthOfTextAtSize: (text, size) => { textMeasureCalls++; return text.length * size * 0.5; } };
   const pdf = {
     setTitle() {},
     setAuthor() {},
@@ -50,7 +51,7 @@ function makePdfHarness() {
     String
   };
   vm.runInNewContext(pdfSource, sandbox);
-  return { window, pages };
+  return { window, pages, getTextMeasureCalls: () => textMeasureCalls };
 }
 
 const payload = {
@@ -94,4 +95,15 @@ test('PDF cliente: riepiloghi lunghi proseguono su più pagine mantenendo riferi
   assert.ok(pages[1].drawTextCalls.some(call => call.text === 'CLIENTE: Cliente Demo'));
   assert.ok(pages[1].drawTextCalls.some(call => call.text === 'PREV-2026-0042'));
   assert.ok(pages[1].drawTextCalls.some(call => call.text.startsWith('TOTALE:')));
+});
+
+test('PDF cliente: accorcia note molto lunghe con un numero limitato di misurazioni', async () => {
+  const harness = makePdfHarness();
+  const longQuote = structuredClone(payload);
+  longQuote.company.logo = '';
+  longQuote.quote.notes = 'Nota '.repeat(2000);
+
+  await harness.window.buildQuotePdfDocument(longQuote, []);
+
+  assert.ok(harness.getTextMeasureCalls() < 100, `Le misurazioni del testo devono restare sotto 100, attuali: ${harness.getTextMeasureCalls()}.`);
 });
