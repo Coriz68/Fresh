@@ -1,6 +1,6 @@
-# Gestionale preventivi — versione 1.0.4
+# Gestionale preventivi — versione 1.0.5
 
-Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0.4 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
+Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0.5 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
 
 ## Requisiti
 
@@ -14,7 +14,7 @@ Il progetto include la configurazione per creare il setup Windows x64 `Gestional
 
 1. Apri `Avvia_gestionale.command` con un doppio clic. Se necessario, usa il menu contestuale **Apri**.
 2. Attendi la creazione di `.venv` e l’installazione dei componenti al primo avvio.
-3. Si apre la finestra **Gestionale preventivi**. Chiudila per uscire.
+3. Si apre la finestra **Gestionale preventivi**. Usa **Chiudi programma** per salvare e uscire in sicurezza.
 
 ### Windows — avvio dalla sorgente
 
@@ -37,6 +37,8 @@ In **Azienda e PDF** seleziona una cartella database e due cartelle PDF diverse.
 - **Genera PDF fornitore · soli moduli** assembla solo le pagine dei moduli, senza riepilogo commerciale o prezzi.
 - In entrambe le uscite, i moduli riportano il nome del cliente e il riferimento del preventivo.
 - I file vengono messi nelle rispettive cartelle. Le collisioni di nome ricevono un suffisso numerico, senza sovrascrivere i PDF esistenti.
+- I due pulsanti WhatsApp generano e salvano prima il PDF corretto, poi aprono WhatsApp con il testo già pronto. Scegli il destinatario, allega il PDF dalla cartella indicata e premi **Invia**: l’app non spedisce messaggi o allegati automaticamente.
+- In caso di problemi, il registro tecnico locale si trova in `logs/app.log` nella cartella dati dell’applicazione. Contiene fasi e tempi, senza contenuti dei preventivi.
 
 Esporta periodicamente un backup JSON e custodiscilo separatamente dal computer. Il database non è cifrato.
 

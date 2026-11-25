@@ -148,6 +148,15 @@ function persistSoon() {
   saveTimer = setTimeout(() => { void persistNow(); }, 350);
 }
 
+function logDesktopEvent(event) {
+  if (typeof desktopBridge?.log_event !== 'function') return;
+  try {
+    Promise.resolve(desktopBridge.log_event(event)).catch(() => undefined);
+  } catch {
+    // Diagnostics must never interrupt saving or PDF generation.
+  }
+}
+
 function persistNow() {
   clearTimeout(saveTimer);
   if (!state) return Promise.resolve(false);
@@ -157,14 +166,17 @@ function persistNow() {
     showToast(lastSaveError.message, true);
     return Promise.resolve(false);
   }
+  logDesktopEvent('state_save_started');
   const pendingSave = saveQueue
     .catch(() => undefined)
     .then(() => desktopBridge ? desktopBridge.save_state(snapshot) : writeState(snapshot));
   saveQueue = pendingSave.then(() => {
     lastSaveError = null;
+    logDesktopEvent('state_save_succeeded');
     return true;
   }).catch(error => {
     lastSaveError = error;
+    logDesktopEvent('state_save_failed');
     showToast(`Errore di salvataggio: ${error.message}`, true);
     return false;
   });
@@ -180,6 +192,15 @@ window.flushDesktopBeforeClose = async () => {
       return false;
     }
     return true;
+  }
+  if (moduleDialog.open && activeModuleItemId) {
+    clearTimeout(modulePullTimer);
+    try {
+      await pullActiveModule();
+    } catch (error) {
+      showToast(`Impossibile salvare il modulo aperto: ${error.message}`, true);
+      return false;
+    }
   }
   return persistNow();
 };
@@ -494,6 +515,9 @@ function renderQuote() {
         <div class="card-head"><div><h2>${esc(quote.number)}</h2><p>Creato il ${dateLabel(quote.createdAt)}</p></div><span class="status ${quoteStatusClass(quote.status)}">${esc(quote.status || 'bozza')}</span></div>
         <button class="button primary" data-action="generate-pdf" data-kind="customer">Genera PDF cliente completo</button>
         <button class="button" data-action="generate-pdf" data-kind="supplier">Genera PDF fornitore · soli moduli</button>
+        ${desktopBridge ? `<button class="button" data-action="share-pdf-whatsapp" data-kind="customer" ${storagePaths.customer_pdf_dir ? '' : 'disabled'}>Invia PDF cliente con WhatsApp</button>
+        <button class="button" data-action="share-pdf-whatsapp" data-kind="supplier" ${storagePaths.supplier_pdf_dir ? '' : 'disabled'}>Invia PDF fornitore con WhatsApp</button>
+        <div class="footer-note">WhatsApp si apre con il messaggio pronto. Scegli il contatto, allega il PDF salvato e conferma l’invio.</div>` : ''}
         <button class="button" data-action="save-quote">Salva preventivo</button>
         <button class="button" data-action="back-quotes">Torna all’archivio</button>
         <div class="footer-note">Il PDF cliente include riepilogo e moduli. Quello fornitore contiene solo i moduli, con nome cliente e riferimento al preventivo.</div>
@@ -751,6 +775,34 @@ async function handleLogoUpload(file) {
   showToast('Logo salvato nelle impostazioni locali.');
 }
 
+function buildWhatsAppMessage(kind, quoteNumber, clientName, filename) {
+  if (kind === 'customer') {
+    return `Buongiorno, invio il preventivo completo ${quoteNumber} intestato a ${clientName}. Allego il PDF ${filename}.`;
+  }
+  return `Buongiorno, invio i soli moduli del preventivo ${quoteNumber} intestato a ${clientName}. Allego il PDF ${filename}.`;
+}
+
+async function shareQuotePdfViaWhatsApp(kind) {
+  if (!desktopBridge?.open_whatsapp) {
+    showToast('La condivisione WhatsApp è disponibile nella finestra desktop.', true);
+    return;
+  }
+  const quote = getQuote();
+  if (!quote) return;
+  const client = activeClient(quote);
+  try {
+    const generated = await generateQuotePdf(kind);
+    if (!generated?.path) return;
+    const filename = generated.path.split(/[\\/]/).pop();
+    const clientName = client?.name || client?.company || 'Cliente';
+    const message = buildWhatsAppMessage(kind, quote.number, clientName, filename);
+    await desktopBridge.open_whatsapp(message);
+    showToast(`PDF salvato: ${generated.path}. In WhatsApp allega ${filename} e conferma l’invio.`);
+  } catch (error) {
+    showToast(`WhatsApp non aperto: ${error.message}`, true);
+  }
+}
+
 async function generateQuotePdf(kind = 'customer') {
   const quote = getQuote();
   if (!quote) return;
@@ -781,8 +833,11 @@ async function generateQuotePdf(kind = 'customer') {
     return;
   }
   pdfGenerationActive = true;
+  logDesktopEvent('pdf_generation_started');
   document.querySelectorAll('[data-action="generate-pdf"]').forEach(button => { button.disabled = true; });
+  document.querySelectorAll('[data-action="share-pdf-whatsapp"]').forEach(button => { button.disabled = true; });
   const resumeModuleItemId = moduleDialog.open ? activeModuleItemId : null;
+  let savedPdfPath = '';
   try {
     if (resumeModuleItemId) {
       await pullActiveModule();
@@ -792,6 +847,7 @@ async function generateQuotePdf(kind = 'customer') {
     try {
       for (let index = 0; index < quote.items.length; index++) {
         const item = quote.items[index];
+        logDesktopEvent('pdf_module_started');
         const model = modules.find(entry => entry.id === item.moduleId);
         if (!model) throw new Error(`Modulo non trovato: ${item.moduleId}.`);
         const originalData = structuredClone(item.data || {});
@@ -825,10 +881,12 @@ async function generateQuotePdf(kind = 'customer') {
       };
       let bytes;
       if (kind === 'customer') {
+        logDesktopEvent('pdf_customer_assembly');
         showPdfProgress('Compongo il riepilogo commerciale e unisco i moduli…');
         const response = await requestModule('build-quote-pdf', { payload, modulePdfs });
         bytes = response.bytes;
       } else {
+        logDesktopEvent('pdf_supplier_merge');
         showPdfProgress('Unisco le pagine dei moduli…');
         const supplierBuilder = frame.contentWindow?.buildSupplierPdfDocument;
         if (typeof supplierBuilder !== 'function') throw new Error('Generatore PDF fornitore non disponibile.');
@@ -844,10 +902,12 @@ async function generateQuotePdf(kind = 'customer') {
       document.querySelector('#pdfDialogEyebrow').textContent = kind === 'customer' ? 'DOCUMENTO CLIENTE' : 'DOCUMENTO FORNITORE';
       pdfDialog.showModal();
       if (desktopBridge) {
+        logDesktopEvent('pdf_disk_save_started');
         showPdfProgress('Salvo il PDF nella cartella configurata…');
         const base64 = bytesToBase64(bytes);
         const prefix = kind === 'customer' ? 'cliente' : 'fornitore';
         const saved = await desktopBridge.write_pdf(kind, `preventivo_${quote.number}_${prefix}.pdf`, base64);
+        savedPdfPath = saved.path;
         showToast(`PDF ${prefix} salvato: ${saved.path}`);
       } else {
         showToast(`Anteprima PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} pronta.`);
@@ -863,11 +923,16 @@ async function generateQuotePdf(kind = 'customer') {
       }
     }
   } catch (error) {
+    logDesktopEvent('pdf_generation_failed');
     showToast(`PDF non generato: ${error.message}`, true);
   } finally {
     pdfGenerationActive = false;
     document.querySelectorAll('[data-action="generate-pdf"]').forEach(button => { button.disabled = false; });
+    document.querySelectorAll('[data-action="share-pdf-whatsapp"]').forEach(button => {
+      button.disabled = button.dataset.kind === 'customer' ? !storagePaths.customer_pdf_dir : !storagePaths.supplier_pdf_dir;
+    });
   }
+  return savedPdfPath ? { path: savedPdfPath, kind } : null;
 }
 
 function bytesToBase64(bytes) {
@@ -990,6 +1055,7 @@ function handleClick(event) {
       renderQuote();
     }
   } else if (action === 'generate-pdf') generateQuotePdf(button.dataset.kind || 'customer');
+  else if (action === 'share-pdf-whatsapp') shareQuotePdfViaWhatsApp(button.dataset.kind || 'customer');
   else if (action === 'save-quote') {
     const quote = getQuote();
     if (quote) {
@@ -1046,6 +1112,19 @@ app.addEventListener('change', event => {
 });
 
 document.querySelector('#newQuoteTop').addEventListener('click', newQuote);
+const closeAppButton = document.querySelector('#closeAppButton');
+closeAppButton.hidden = !DESKTOP_MODE;
+closeAppButton.addEventListener('click', async () => {
+  if (!desktopBridge?.request_close) {
+    showToast('Il collegamento per la chiusura sicura non è pronto. Usa la X della finestra.', true);
+    return;
+  }
+  try {
+    await desktopBridge.request_close();
+  } catch (error) {
+    showToast(`Chiusura non riuscita: ${error.message}`, true);
+  }
+});
 document.querySelector('#moduleSave').addEventListener('click', closeModuleEditor);
 document.querySelector('#moduleClose').addEventListener('click', closeModuleEditor);
 moduleDialog.addEventListener('cancel', event => {
@@ -1104,6 +1183,7 @@ async function init() {
     if (desktopBridge) {
       const [initial, catalog] = await Promise.all([desktopBridge.load_initial_data(), loadCatalog()]);
       state = initial.state;
+      logDesktopEvent('bridge_ready');
       storagePaths = initial.paths || storagePaths;
       databaseError = initial.database_error || '';
       modules = catalog;

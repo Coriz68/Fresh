@@ -1,5 +1,5 @@
 #define AppName "Gestionale Preventivi"
-#define AppVersion "1.0.4"
+#define AppVersion "1.0.5"
 #define AppExeName "GestionalePreventivi.exe"
 
 [Setup]
@@ -10,7 +10,7 @@ AppPublisher=Area Tenda
 DefaultDirName={autopf}\Gestionale Preventivi
 DefaultGroupName={#AppName}
 OutputDir=..\..\dist-installer
-OutputBaseFilename=Gestionale Preventivi 1.0.4 Setup
+OutputBaseFilename=Gestionale Preventivi 1.0.5 Setup
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=admin

@@ -150,6 +150,8 @@ window.buildSupplierPdfDocument = async function (modulePdfs, quoteNumber, clien
 function pdfSafeText(value) {
   return String(value ?? '')
     .replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/…/g, '...')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '')
     .replace(/[^\u0000-\u00ff\u20ac]/g, '?');
 }
 

@@ -11,7 +11,13 @@ function makePdfHarness() {
   const pages = [];
   let textMeasureCalls = 0;
   const logoSize = { width: 2048, height: 2048 };
-  const regular = { widthOfTextAtSize: (text, size) => { textMeasureCalls++; return text.length * size * 0.5; } };
+  const regular = {
+    widthOfTextAtSize: (text, size) => {
+      textMeasureCalls++;
+      if (/[\u0000-\u001f\u007f-\u009f]/.test(text)) throw new Error('WinAnsi cannot encode control characters');
+      return text.length * size * 0.5;
+    }
+  };
   const pdf = {
     setTitle() {},
     setAuthor() {},
@@ -106,4 +112,27 @@ test('PDF cliente: accorcia note molto lunghe con un numero limitato di misurazi
   await harness.window.buildQuotePdfDocument(longQuote, []);
 
   assert.ok(harness.getTextMeasureCalls() < 100, `Le misurazioni del testo devono restare sotto 100, attuali: ${harness.getTextMeasureCalls()}.`);
+});
+
+test('PDF cliente: normalizza note multilinea e rimuove caratteri di controllo', async () => {
+  const { window, pages } = makePdfHarness();
+  const multilineQuote = structuredClone(payload);
+  multilineQuote.company.logo = '';
+  multilineQuote.quote.notes = 'Prima riga\r\nSeconda riga\ttabulato\u0085C1';
+
+  await window.buildQuotePdfDocument(multilineQuote, []);
+
+  assert.ok(pages[0].drawTextCalls.some(call => call.text === 'NOTE: Prima riga Seconda riga tabulatoC1'));
+});
+
+test('PDF cliente: una nota di un milione di caratteri viene accorciata rapidamente', async () => {
+  const harness = makePdfHarness();
+  const hugeQuote = structuredClone(payload);
+  hugeQuote.company.logo = '';
+  hugeQuote.quote.notes = 'X'.repeat(1_000_000);
+
+  await harness.window.buildQuotePdfDocument(hugeQuote, []);
+
+  assert.ok(harness.getTextMeasureCalls() < 100, `Le misurazioni devono restare sotto 100, attuali: ${harness.getTextMeasureCalls()}.`);
+  assert.ok(harness.pages[0].drawTextCalls.some(call => call.text.startsWith('NOTE: X') && call.text.endsWith('...')));
 });
