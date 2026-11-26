@@ -252,6 +252,27 @@ function snapshotClient(client) {
   };
 }
 
+function normalizePhoneNumber(value) {
+  const original = String(value ?? '').trim();
+  if (!original) return { value: '', valid: true, empty: true };
+  let normalized = original.replace(/\(\s*0\s*\)/g, '').replace(/[\s().-]/g, '');
+  if (normalized.startsWith('00')) normalized = `+${normalized.slice(2)}`;
+  else if (!normalized.startsWith('+')) normalized = `+39${normalized}`;
+  const valid = /^\+[1-9]\d{7,14}$/.test(normalized);
+  return { value: normalized, valid, empty: false };
+}
+
+function updatePhoneValidation(input) {
+  const result = normalizePhoneNumber(input.value);
+  const feedback = formDialog.querySelector('#phoneValidation');
+  input.setAttribute('aria-invalid', result.empty || result.valid ? 'false' : 'true');
+  if (feedback) {
+    feedback.textContent = result.empty || result.valid ? '' : 'Numero non valido. Usa un numero nazionale o internazionale con 8–15 cifre.';
+    feedback.hidden = result.empty || result.valid;
+  }
+  return result;
+}
+
 function activeClient(quote) {
   return quote.clientSnapshot || snapshotClient(getClient(quote.clientId));
 }
@@ -548,14 +569,21 @@ function clientFields(client = {}) {
     ['postalCode', 'CAP', ''],
     ['city', 'CITTÀ', ''],
     ['province', 'PROVINCIA', ''],
-    ['phone', 'TELEFONO', ''],
     ['email', 'EMAIL', '']
   ];
-  return `<div class="form-grid">${fields.map(([key, label, placeholder]) => `<div class="field"><label>${label}</label><input name="${key}" value="${esc(client[key] || '')}" placeholder="${esc(placeholder)}"></div>`).join('')}</div>`;
+  return `<div class="form-grid">${fields.map(([key, label, placeholder]) => `<div class="field"><label>${label}</label><input name="${key}" value="${esc(client[key] || '')}" placeholder="${esc(placeholder)}"></div>`).join('')}
+    <div class="field"><label for="clientPhone">CELLULARE (FACOLTATIVO)</label><input id="clientPhone" name="phone" type="tel" inputmode="tel" autocomplete="tel" aria-describedby="phoneValidation" value="${esc(client.phone || '')}" placeholder="333 123 4567 o +33…"><p id="phoneValidation" class="validation-error" hidden></p></div></div>`;
 }
 
 function openClientDialog(existing = null) {
   openFormDialog(existing ? 'Modifica cliente' : 'Nuovo cliente', clientFields(existing || {}), async values => {
+    const phone = normalizePhoneNumber(values.phone);
+    if (!phone.valid) {
+      updatePhoneValidation(formDialog.querySelector('[name="phone"]'));
+      showToast('Inserisci un numero di cellulare valido oppure lascia il campo vuoto.', true);
+      return;
+    }
+    values.phone = phone.value;
     const client = { ...(existing || {}), ...values, id: existing?.id || makeId(), updatedAt: new Date().toISOString() };
     if (!client.name.trim() && !client.company.trim()) {
       showToast('Inserisci il nome del cliente o la ragione sociale.', true);
@@ -566,6 +594,12 @@ function openClientDialog(existing = null) {
     await persistNow();
     render();
     showToast(existing ? 'Anagrafica cliente aggiornata.' : 'Cliente registrato.');
+  });
+  const phoneInput = formDialog.querySelector('[name="phone"]');
+  phoneInput.addEventListener('input', () => updatePhoneValidation(phoneInput));
+  phoneInput.addEventListener('blur', () => {
+    const result = updatePhoneValidation(phoneInput);
+    if (result.valid && !result.empty) phoneInput.value = result.value;
   });
 }
 

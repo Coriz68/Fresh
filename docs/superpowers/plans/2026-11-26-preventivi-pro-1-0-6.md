@@ -56,11 +56,11 @@
 **Interfaces:**
 - Produces: `normalizePhoneNumber(value) -> { value: string, valid: boolean, empty: boolean }`, using E.164-like formatting with 8–15 digits; national Italian numbers receive `+39`. Empty is allowed, but a nonempty invalid value blocks saving the client and shows an inline error.
 
-- [ ] **Step 1: Write failing tests** `normalizePhoneNumber adds the Italian prefix`, `normalizePhoneNumber accepts international numbers`, `normalizePhoneNumber allows an empty optional value`, `normalizePhoneNumber rejects malformed lengths`, and `invalid phone prevents client save`. Assert exact normalized output, validity, and unchanged client list after rejected save.
-- [ ] **Step 2: Run** `node --test tests/test_preventivi_v1_0_6.js`. Expected: tests fail because the helper is absent.
-- [ ] **Step 3: Implement** a pure normalizer, use it to render a `type=tel` client field with live feedback and to normalize on save. Keep blank optional and block formally invalid nonblank input.
-- [ ] **Step 4: Run** `node --test tests/test_preventivi_v1_0_6.js`. Expected: all phone cases pass.
-- [ ] **Step 5: Run** `node --test tests/*.js`. Expected: all JavaScript tests pass.
+- [x] **Step 1: Write failing tests** `normalizePhoneNumber adds the Italian prefix`, `normalizePhoneNumber accepts international numbers`, `normalizePhoneNumber allows an empty optional value`, `normalizePhoneNumber rejects malformed lengths`, and `invalid phone prevents client save`. Assert exact normalized output, validity, and unchanged client list after rejected save.
+- [x] **Step 2: Run** `node --test tests/test_preventivi_v1_0_6.js`. Expected: tests fail because the helper is absent.
+- [x] **Step 3: Implement** a pure normalizer, use it to render a `type=tel` client field with live feedback and to normalize on save. Keep blank optional and block formally invalid nonblank input.
+- [x] **Step 4: Run** `node --test tests/test_preventivi_v1_0_6.js`. Expected: all phone cases pass.
+- [x] **Step 5: Run** `node --test tests/*.js`. Expected: all JavaScript tests pass.
 
 ### Task 3: Open WhatsApp Desktop with recipient only
 
