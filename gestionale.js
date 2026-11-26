@@ -565,9 +565,9 @@ function renderQuote() {
         <button class="button" data-action="duplicate-quote">Duplica preventivo</button>
         <button class="button primary" data-action="generate-pdf" data-kind="customer">Genera PDF cliente completo</button>
         <button class="button" data-action="generate-pdf" data-kind="supplier">Genera PDF fornitore · soli moduli</button>
-        ${desktopBridge ? `<button class="button" data-action="share-pdf-whatsapp" data-kind="customer" ${storagePaths.customer_pdf_dir ? '' : 'disabled'}>Invia PDF cliente con WhatsApp</button>
-        <button class="button" data-action="share-pdf-whatsapp" data-kind="supplier" ${storagePaths.supplier_pdf_dir ? '' : 'disabled'}>Invia PDF fornitore con WhatsApp</button>
-        <div class="footer-note">WhatsApp Desktop apre la chat senza testo. Allega il PDF corretto e conferma l’invio nella chat; poi registra l’esito qui sotto.</div>` : ''}
+        ${desktopBridge ? `<button class="button" data-action="share-pdf-whatsapp" data-kind="customer" ${storagePaths.customer_pdf_dir ? '' : 'disabled'}>Condividi PDF cliente con WhatsApp</button>
+        <button class="button" data-action="share-pdf-whatsapp" data-kind="supplier" ${storagePaths.supplier_pdf_dir ? '' : 'disabled'}>Condividi PDF fornitore con WhatsApp</button>
+        <div class="footer-note">Il pulsante apre Esplora file sul PDF. Scegli Condividi → WhatsApp, verifica destinatario e documento, poi invia manualmente.</div>` : ''}
         <button class="button" data-action="mark-quote-sent" data-kind="customer">Conferma invio PDF cliente</button>
         <button class="button" data-action="mark-quote-sent" data-kind="supplier">Conferma invio PDF fornitore</button>
         <button class="button" data-action="save-quote">Salva preventivo</button>
@@ -883,6 +883,13 @@ async function handleLogoUpload(file) {
   showToast('Logo salvato nelle impostazioni locali.');
 }
 
+function setPdfShareInstructions(message) {
+  const instructions = document.querySelector('#pdfShareInstructions');
+  if (!instructions) return;
+  instructions.textContent = message;
+  instructions.hidden = false;
+}
+
 async function shareQuotePdfViaWhatsApp(kind) {
   if (!desktopBridge?.reveal_pdf_in_explorer) {
     showToast('La condivisione WhatsApp è disponibile nella finestra desktop.', true);
@@ -896,12 +903,16 @@ async function shareQuotePdfViaWhatsApp(kind) {
     generated = await generateQuotePdf(kind);
     if (!generated?.path) return;
     const filename = generated.path.split(/[\\/]/).pop();
+    const instructions = `PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} pronto: ${filename}. In Esplora file scegli Condividi → WhatsApp, seleziona il destinatario e verifica il documento prima di inviare.`;
+    setPdfShareInstructions(instructions);
     await desktopBridge.reveal_pdf_in_explorer(kind, generated.path);
-    showToast(`PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} pronto: ${filename}. In Esplora file scegli Condividi → WhatsApp, verifica destinatario e allegato, poi invia manualmente.`);
+    showToast(`Esplora file ha selezionato ${filename}. Scegli Condividi → WhatsApp e controlla il destinatario.`);
   } catch (error) {
     const filename = generated?.path ? generated.path.split(/[\\/]/).pop() : '';
     const fallback = generated?.path ? ` PDF salvato in: ${generated.path}. Aprilo manualmente.` : '';
-    showToast(`${filename ? `Condivisione non preparata per ${filename}` : 'Condivisione non preparata'}: ${error.message}.${fallback}`, true);
+    const failure = `${filename ? `Condivisione non preparata per ${filename}` : 'Condivisione non preparata'}: ${error.message}.${fallback}`;
+    setPdfShareInstructions(failure);
+    showToast(failure, true);
   }
 }
 

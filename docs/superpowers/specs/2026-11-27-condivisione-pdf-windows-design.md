@@ -13,7 +13,7 @@ Rendere affidabile la preparazione della condivisione del PDF cliente o fornitor
 ## Flusso e vincoli
 
 - Generare e salvare il PDF corretto prima di aprire Esplora file; evidenziare quel file, senza avviare WhatsApp né chiedere al gestionale di selezionare un destinatario.
-- Mostrare istruzioni chiare: in Esplora file usare Condividi → WhatsApp, controllare il destinatario e l’allegato, quindi inviare manualmente.
+- Mostrare istruzioni persistenti nella finestra di anteprima PDF: in Esplora file usare Condividi → WhatsApp, controllare destinatario e allegato, quindi inviare manualmente. Se Explorer non si apre, mostrare lì il percorso completo del PDF salvato.
 - Il bridge accetta solo un PDF esistente nella cartella configurata per il suo tipo (cliente/fornitore); non apre percorsi arbitrari.
 - Non usare o modificare gli appunti. Non automatizzare la scelta del contatto, l’allegato nel pannello, né il pulsante Invia.
 - Se Esplora file non può essere aperto, lasciare il PDF salvato e mostrarne il percorso per l’allegato manuale.

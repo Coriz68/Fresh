@@ -130,11 +130,11 @@ class DesktopApiTests(unittest.TestCase):
         pdf_path = customer_dir / "preventivo cliente.pdf"
         pdf_path.write_bytes(b"%PDF-1.7 sample")
 
-        with patch("desktop_app.subprocess.Popen") as popen:
+        with patch("desktop_app._show_pdf_in_explorer") as show_pdf:
             result = self.api.reveal_pdf_in_explorer("customer", str(pdf_path), platform_name="nt")
 
         self.assertEqual(result, {"ok": True})
-        popen.assert_called_once_with(["explorer.exe", f"/select,{pdf_path.resolve()}"])
+        show_pdf.assert_called_once_with(pdf_path.resolve())
 
     def test_reveal_pdf_in_explorer_selects_supplier_pdf_from_supplier_folder(self):
         supplier_dir = self.root / "pdf fornitore"
@@ -143,10 +143,24 @@ class DesktopApiTests(unittest.TestCase):
         pdf_path = supplier_dir / "preventivo fornitore.pdf"
         pdf_path.write_bytes(b"%PDF-1.7 sample")
 
-        with patch("desktop_app.subprocess.Popen") as popen:
+        with patch("desktop_app._show_pdf_in_explorer") as show_pdf:
             self.api.reveal_pdf_in_explorer("supplier", str(pdf_path), platform_name="nt")
 
-        popen.assert_called_once_with(["explorer.exe", f"/select,{pdf_path.resolve()}"])
+        show_pdf.assert_called_once_with(pdf_path.resolve())
+
+    def test_reveal_pdf_in_explorer_rejects_supplier_pdf_nested_under_customer_folder(self):
+        customer_dir = self.root / "pdf"
+        supplier_dir = customer_dir / "fornitore"
+        supplier_dir.mkdir(parents=True)
+        self.store.set_output_folder("customer", customer_dir)
+        supplier_pdf = supplier_dir / "preventivo_fornitore.pdf"
+        supplier_pdf.write_bytes(b"%PDF-1.7 sample")
+
+        with patch("desktop_app._show_pdf_in_explorer") as show_pdf:
+            with self.assertRaisesRegex(ValueError, "cartella"):
+                self.api.reveal_pdf_in_explorer("customer", str(supplier_pdf), platform_name="nt")
+
+        show_pdf.assert_not_called()
 
     def test_reveal_pdf_in_explorer_rejects_invalid_kind_and_unconfigured_folder(self):
         with self.assertRaisesRegex(ValueError, "[Tt]ipo"):
@@ -189,7 +203,7 @@ class DesktopApiTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Windows"):
             self.api.reveal_pdf_in_explorer("customer", str(pdf_path), platform_name="darwin")
-        with patch("desktop_app.subprocess.Popen", side_effect=OSError("Explorer unavailable")):
+        with patch("desktop_app._show_pdf_in_explorer", side_effect=OSError("Explorer unavailable")):
             with self.assertRaisesRegex(RuntimeError, "Esplora file"):
                 self.api.reveal_pdf_in_explorer("customer", str(pdf_path), platform_name="nt")
 

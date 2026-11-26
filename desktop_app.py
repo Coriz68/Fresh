@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import sys
-import subprocess
 import threading
 import time
 from datetime import date
@@ -22,6 +21,54 @@ from local_store import LocalStore
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 APP_TITLE = "Gestionale preventivi"
 APP_LOGGER = logging.getLogger("area_tenda_preventivi")
+
+
+def _show_pdf_in_explorer(pdf_path: Path) -> None:
+    """Use the Windows Shell PIDL API so paths with spaces need no command parsing."""
+    import ctypes
+    from ctypes import wintypes
+
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+    co_initialize = ole32.CoInitialize
+    co_initialize.argtypes = [ctypes.c_void_p]
+    co_initialize.restype = ctypes.c_long
+    co_uninitialize = ole32.CoUninitialize
+    co_uninitialize.argtypes = []
+    co_uninitialize.restype = None
+    parse_display_name = shell32.SHParseDisplayName
+    parse_display_name.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_void_p),
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    parse_display_name.restype = ctypes.c_long
+    open_folder_and_select = shell32.SHOpenFolderAndSelectItems
+    open_folder_and_select.argtypes = [ctypes.c_void_p, wintypes.UINT, ctypes.c_void_p, wintypes.DWORD]
+    open_folder_and_select.restype = ctypes.c_long
+    free_pidl = ole32.CoTaskMemFree
+    free_pidl.argtypes = [ctypes.c_void_p]
+    free_pidl.restype = None
+
+    com_result = co_initialize(None)
+    if com_result < 0 and com_result != -2147417850:  # RPC_E_CHANGED_MODE means COM is already initialized.
+        raise OSError(com_result, "Unable to initialize Windows Shell COM support")
+    initialized_here = com_result >= 0
+    pidl = ctypes.c_void_p()
+    try:
+        result = parse_display_name(str(pdf_path), None, ctypes.byref(pidl), 0, None)
+        if result < 0:
+            raise OSError(result, "Unable to resolve the PDF in Windows Shell")
+        result = open_folder_and_select(pidl, 0, None, 0)
+        if result < 0:
+            raise OSError(result, "Unable to open Explorer with the PDF selected")
+    finally:
+        if pidl:
+            free_pidl(pidl)
+        if initialized_here:
+            co_uninitialize()
 
 
 def configure_app_logging(log_dir: Path | None = None) -> tuple[logging.Logger, Path]:
@@ -236,10 +283,8 @@ class DesktopApi:
             raise FileNotFoundError("Il PDF da condividere non esiste o non è accessibile.") from error
         if not pdf_path.is_file() or pdf_path.suffix.lower() != ".pdf":
             raise ValueError("Il file da condividere non è un PDF valido.")
-        try:
-            pdf_path.relative_to(folder)
-        except ValueError as error:
-            raise ValueError("Il PDF deve trovarsi nella cartella configurata per questo tipo di documento.") from error
+        if pdf_path.parent != folder:
+            raise ValueError("Il PDF deve trovarsi nella cartella configurata per questo tipo di documento.")
         try:
             with pdf_path.open("rb") as stream:
                 is_pdf = stream.read(5) == b"%PDF-"
@@ -248,7 +293,7 @@ class DesktopApi:
         if not is_pdf:
             raise ValueError("Il file da condividere non è un PDF valido.")
         try:
-            subprocess.Popen(["explorer.exe", f"/select,{pdf_path}"])
+            _show_pdf_in_explorer(pdf_path)
         except OSError as error:
             raise RuntimeError("Non riesco ad aprire Esplora file. Il PDF resta salvato nella cartella configurata.") from error
         APP_LOGGER.info("Explorer opened on prepared PDF (%s)", kind)

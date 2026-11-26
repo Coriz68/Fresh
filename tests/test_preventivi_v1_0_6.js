@@ -185,22 +185,26 @@ test('customer and supplier send timestamps are independent', async () => {
 
 test('opening the selected PDF for Windows Share does not mark a quote sent', async () => {
   const share = extractFunction('shareQuotePdfViaWhatsApp');
+  const instructions = extractFunction('setPdfShareInstructions');
   assert.ok(share, 'Il flusso WhatsApp del preventivo deve esistere.');
   const quote = { sentCustomerAt: null, sentSupplierAt: null };
   const bridgeCalls = [];
   const toasts = [];
+  const shareInstructions = { textContent: '', hidden: true };
   const sandbox = {
     desktopBridge: { reveal_pdf_in_explorer: async (...args) => { bridgeCalls.push(args); } },
+    document: { querySelector: selector => selector === '#pdfShareInstructions' ? shareInstructions : null },
     getQuote: () => quote,
     generateQuotePdf: async () => ({ path: 'C:/pdf/quote.pdf' }),
     showToast: message => toasts.push(message)
   };
-  vm.runInNewContext(`${share}\nthis.shareQuotePdfViaWhatsApp = shareQuotePdfViaWhatsApp;`, sandbox);
+  vm.runInNewContext(`${instructions}\n${share}\nthis.shareQuotePdfViaWhatsApp = shareQuotePdfViaWhatsApp;`, sandbox);
 
   await sandbox.shareQuotePdfViaWhatsApp('customer');
 
   assert.deepEqual(bridgeCalls, [['customer', 'C:/pdf/quote.pdf']]);
   assert.match(toasts[0], /Condividi.*WhatsApp/);
+  assert.equal(shareInstructions.hidden, false);
   assert.equal(quote.sentCustomerAt, null);
   assert.equal(quote.sentSupplierAt, null);
 });

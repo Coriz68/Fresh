@@ -4,7 +4,7 @@
 
 **Goal:** Dopo la generazione del PDF, aprire Esplora file con il file selezionato e lasciare all’utente Condividi → WhatsApp, scelta destinatario e invio.
 
-**Architecture:** Il frontend usa un nuovo metodo bridge `reveal_pdf_in_explorer(kind: str, path: str) -> dict[str, bool]`. Il bridge valida il PDF nella cartella configurata per il tipo e avvia Explorer con `/select,<path>`; non apre WhatsApp, non modifica gli appunti e non automatizza l’invio.
+**Architecture:** Il frontend usa un nuovo metodo bridge `reveal_pdf_in_explorer(kind: str, path: str) -> dict[str, bool]`. Il bridge valida il PDF nella cartella configurata per il tipo e usa le API Shell `SHParseDisplayName` e `SHOpenFolderAndSelectItems` per selezionarlo in Explorer, evitando ambiguità di virgolette nei percorsi; non apre WhatsApp, non modifica gli appunti e non automatizza l’invio.
 
 **Tech Stack:** JavaScript, Python 3, pywebview, Windows Explorer, Python `unittest`, Node `node:test`.
 
@@ -33,17 +33,19 @@
 **Files:**
 - Modify: `desktop_app.py`
 - Modify: `gestionale.js`
+- Modify: `Gestione_preventivi.html`
+- Modify: `gestionale.css`
 - Test: `tests/test_desktop_api.py`
 - Test: `tests/test_whatsapp_share.js`
 
 **Interfaces:**
 - Consumes: `generateQuotePdf(kind) -> { path } | null`; impostazioni `customer_pdf_dir` e `supplier_pdf_dir`.
-- Produces: metodo bridge `reveal_pdf_in_explorer(kind: str, path: str) -> dict[str, bool]`, limitato al PDF valido nella cartella configurata; comando Explorer `explorer.exe /select,<resolved path>`.
+- Produces: metodo bridge `reveal_pdf_in_explorer(kind: str, path: str) -> dict[str, bool]`, limitato al PDF valido nella cartella configurata; Explorer seleziona il file tramite le API Shell.
 
-- [x] **Step 1: Aggiornare i test bridge** per accettare solo PDF autentici nelle rispettive cartelle e verificare l’avvio di Explorer con il percorso risolto; verificare anche errori per tipo/cartella/percorso/contenuto non validi e piattaforma non Windows.
-- [x] **Step 2: Aggiornare il test del flusso UI** per verificare che generi il PDF, chiami `reveal_pdf_in_explorer` e mostri le istruzioni Condividi → WhatsApp; verificare che nessuna chiamata apra WhatsApp o automatizzi un allegato.
-- [x] **Step 3: Implementare il bridge** con validazione di tipo, cartella, esistenza, estensione e firma `%PDF-`; avviare `explorer.exe` selezionando il file e propagare un errore operativo se il sistema o Explorer non sono disponibili.
-- [x] **Step 4: Modificare il flusso frontend** rimuovendo prompt del numero, apertura URI WhatsApp e automazione dell’allegato; se la generazione riesce, chiamare il nuovo bridge e spiegare che l’utente deve scegliere Condividi → WhatsApp, controllare il destinatario e inviare manualmente. Se la generazione fallisce, non aprire Explorer.
+- [x] **Step 1: Aggiornare i test bridge** per accettare solo PDF autentici nelle rispettive cartelle e verificare la selezione Explorer del percorso risolto; verificare anche errori per tipo/cartella/percorso/contenuto non validi e piattaforma non Windows.
+- [x] **Step 2: Aggiornare il test del flusso UI** per verificare che generi il PDF, chiami `reveal_pdf_in_explorer`, mostri in modo persistente le istruzioni Condividi → WhatsApp e mantenga visibile il percorso in caso di errore; verificare che nessuna chiamata apra WhatsApp o automatizzi un allegato.
+- [x] **Step 3: Implementare il bridge** con validazione di tipo, cartella, esistenza, estensione e firma `%PDF-`; selezionare il file tramite le API Shell e propagare un errore operativo se il sistema o Explorer non sono disponibili.
+- [x] **Step 4: Modificare il flusso frontend** rimuovendo prompt del numero, apertura URI WhatsApp e automazione dell’allegato; se la generazione riesce, aggiornare il pannello persistente dell’anteprima e chiamare il nuovo bridge; in caso di errore mostrare lì anche il percorso completo. Se la generazione fallisce, non aprire Explorer.
 - [x] **Step 5: Eseguire le verifiche automatiche mirate** (`python -m unittest tests.test_desktop_api` e `node --test tests/test_whatsapp_share.js`) e controllare che il diff sia pulito.
 
 ### Task 2: Rimuovere la vecchia automazione e aggiornare le istruzioni
