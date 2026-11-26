@@ -32,7 +32,7 @@ PREVENTIVI E PDF
 2. “Genera PDF cliente completo” crea un documento con riepilogo, dati aziendali e cliente, prezzi, sconti, IVA, note e tutti i moduli. Ogni modulo riporta il nome del cliente e il numero del preventivo.
 3. “Genera PDF fornitore · soli moduli” crea il PDF con le pagine originali dei moduli, senza riepilogo commerciale e senza prezzi; i moduli riportano nome cliente e numero preventivo.
 4. Ogni PDF viene salvato nella cartella scelta per la relativa destinazione. Se un file con lo stesso nome esiste già, viene creato un nome con suffisso numerico.
-5. WhatsApp apre la chat del destinatario senza testo; allega il PDF manualmente e invia. Poi conferma nell’app l’invio effettivo del PDF cliente o fornitore. La finestra di anteprima permette anche di scaricare una copia.
+5. Il pulsante WhatsApp apre Esplora file con il PDF selezionato. Scegli Condividi > WhatsApp, seleziona e verifica il destinatario e l’allegato, poi invia manualmente. Se WhatsApp non compare tra le destinazioni, allega il PDF dalla cartella configurata. Poi conferma nell’app l’invio effettivo del PDF cliente o fornitore.
 
 VERIFICA WINDOWS
 Prima della consegna, prova installazione, avvio, generazione dei due PDF, cartelle locali, backup e disinstallazione su un computer Windows 10/11. Il setup non è firmato digitalmente e Windows potrebbe mostrare l'avviso per autore sconosciuto.

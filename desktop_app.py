@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import sys
+import subprocess
 import threading
 import time
 from datetime import date
@@ -22,39 +22,6 @@ from local_store import LocalStore
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 APP_TITLE = "Gestionale preventivi"
 APP_LOGGER = logging.getLogger("area_tenda_preventivi")
-
-
-def normalize_whatsapp_phone(phone: str) -> str:
-    value = str(phone or "").strip()
-    italian_prefix_with_trunk = bool(re.match(r"^(?:\+|00)39\s*\(0\)", value))
-    value = re.sub(r"\(\s*0\s*\)", "0" if italian_prefix_with_trunk else "", value)
-    value = re.sub(r"[\s().-]", "", value)
-    if value.startswith("00"):
-        value = f"+{value[2:]}"
-    elif not value.startswith("+"):
-        value = f"+39{value}"
-    if not re.fullmatch(r"\+[1-9]\d{7,14}", value):
-        raise ValueError("Inserisci un numero WhatsApp formalmente valido (8–15 cifre).")
-    return value[1:]
-
-
-def launch_whatsapp_uri(uri: str, *, platform_name: str | None = None) -> None:
-    if (platform_name or os.name) != "nt":
-        raise RuntimeError("L’apertura di WhatsApp Desktop è disponibile solo su Windows.")
-    startfile = getattr(os, "startfile", None)
-    if not callable(startfile):
-        raise RuntimeError("Windows non ha un gestore registrato per WhatsApp Desktop.")
-    try:
-        startfile(uri)
-    except OSError as error:
-        raise RuntimeError("Non riesco ad aprire WhatsApp Desktop. Verifica che sia installato.") from error
-
-
-def _attach_pdf_in_whatsapp(path: Path) -> None:
-    # Keep Windows-only UI Automation out of startup and non-Windows imports.
-    from whatsapp_windows import attach_pdf_to_open_chat
-
-    attach_pdf_to_open_chat(path)
 
 
 def configure_app_logging(log_dir: Path | None = None) -> tuple[logging.Logger, Path]:
@@ -209,8 +176,7 @@ class DesktopApi:
         "export_backup",
         "import_backup",
         "request_close",
-        "open_whatsapp",
-        "attach_whatsapp_pdf",
+        "reveal_pdf_in_explorer",
         "log_event",
     })
     _ALLOWED_FRONTEND_EVENTS = frozenset({
@@ -223,12 +189,10 @@ class DesktopApi:
         self,
         store: LocalStore | None = None,
         window: Any = None,
-        whatsapp_attacher: Any = None,
     ):
         self._store = store if store is not None else LocalStore()
         self._window = window
         self._close_coordinator: CloseCoordinator | None = None
-        self._whatsapp_attacher = whatsapp_attacher or _attach_pdf_in_whatsapp
 
     def __dir__(self) -> list[str]:
         return sorted(self.EXPOSED_METHODS)
@@ -250,20 +214,15 @@ class DesktopApi:
         APP_LOGGER.info("frontend event: %s", event)
         return {"ok": True}
 
-    def open_whatsapp(self, phone: str) -> dict[str, bool]:
-        digits = normalize_whatsapp_phone(phone)
-        launch_whatsapp_uri(f"whatsapp://send?phone={digits}")
-        APP_LOGGER.info("WhatsApp Desktop protocol opened")
-        return {"ok": True}
-
-    def attach_whatsapp_pdf(
+    def reveal_pdf_in_explorer(
         self,
         kind: str,
         path: str,
-        recipient_confirmed: bool,
+        *,
+        platform_name: str | None = None,
     ) -> dict[str, bool]:
-        if not recipient_confirmed:
-            raise ValueError("Conferma prima che la chat WhatsApp mostri il destinatario corretto.")
+        if (platform_name or os.name) != "nt":
+            raise RuntimeError("La condivisione tramite Esplora file è disponibile solo su Windows.")
         path_key = {"customer": "customer_pdf_dir", "supplier": "supplier_pdf_dir"}.get(kind)
         if path_key is None:
             raise ValueError("Tipo di PDF non riconosciuto.")
@@ -274,9 +233,9 @@ class DesktopApi:
         try:
             pdf_path = Path(path).expanduser().resolve(strict=True)
         except (OSError, TypeError, ValueError) as error:
-            raise FileNotFoundError("Il PDF da allegare non esiste o non è accessibile.") from error
+            raise FileNotFoundError("Il PDF da condividere non esiste o non è accessibile.") from error
         if not pdf_path.is_file() or pdf_path.suffix.lower() != ".pdf":
-            raise ValueError("Il file da allegare non è un PDF valido.")
+            raise ValueError("Il file da condividere non è un PDF valido.")
         try:
             pdf_path.relative_to(folder)
         except ValueError as error:
@@ -285,11 +244,14 @@ class DesktopApi:
             with pdf_path.open("rb") as stream:
                 is_pdf = stream.read(5) == b"%PDF-"
         except OSError as error:
-            raise FileNotFoundError("Il PDF da allegare non è accessibile.") from error
+            raise FileNotFoundError("Il PDF da condividere non è accessibile.") from error
         if not is_pdf:
-            raise ValueError("Il file da allegare non è un PDF valido.")
-        self._whatsapp_attacher(pdf_path)
-        APP_LOGGER.info("WhatsApp PDF attachment prepared (%s)", kind)
+            raise ValueError("Il file da condividere non è un PDF valido.")
+        try:
+            subprocess.Popen(["explorer.exe", f"/select,{pdf_path}"])
+        except OSError as error:
+            raise RuntimeError("Non riesco ad aprire Esplora file. Il PDF resta salvato nella cartella configurata.") from error
+        APP_LOGGER.info("Explorer opened on prepared PDF (%s)", kind)
         return {"ok": True}
 
     def load_initial_data(self) -> dict[str, Any]:

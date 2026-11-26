@@ -884,7 +884,7 @@ async function handleLogoUpload(file) {
 }
 
 async function shareQuotePdfViaWhatsApp(kind) {
-  if (!desktopBridge?.open_whatsapp) {
+  if (!desktopBridge?.reveal_pdf_in_explorer) {
     showToast('La condivisione WhatsApp è disponibile nella finestra desktop.', true);
     return;
   }
@@ -892,38 +892,16 @@ async function shareQuotePdfViaWhatsApp(kind) {
   const quote = getQuote();
   if (!quote) return;
   let generated = null;
-  let whatsappOpened = false;
   try {
-    const currentClient = kind === 'customer' && quote.clientId ? getClient(quote.clientId) : null;
-    const suggestedPhone = kind === 'customer' ? (currentClient?.phone || '') : '';
-    const recipient = window.prompt(
-      kind === 'customer' ? 'Numero WhatsApp del cliente. Verifica o modifica il destinatario:' : 'Numero WhatsApp del fornitore:',
-      suggestedPhone
-    );
-    if (recipient === null) return;
-    const normalizedPhone = normalizePhoneNumber(recipient);
-    if (normalizedPhone.empty || !normalizedPhone.valid) {
-      showToast('Inserisci un numero WhatsApp valido per aprire la conversazione.', true);
-      return;
-    }
     generated = await generateQuotePdf(kind);
     if (!generated?.path) return;
     const filename = generated.path.split(/[\\/]/).pop();
-    await desktopBridge.open_whatsapp(normalizedPhone.value);
-    whatsappOpened = true;
-    const confirmed = window.confirm(
-      `WhatsApp Desktop è stato aperto per ${normalizedPhone.value}. Verifica che nella finestra WhatsApp sia visibile la chat corretta (se serve usa Alt+Tab), poi conferma per allegare ${filename}. Il PDF sarà preparato come allegato, ma non verrà inviato.`
-    );
-    if (!confirmed) {
-      showToast(`PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} salvato: ${filename}. Allegato non preparato; puoi allegarlo manualmente nella chat.`);
-      return;
-    }
-    await desktopBridge.attach_whatsapp_pdf(kind, generated.path, true);
-    showToast(`PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} allegato in WhatsApp: ${filename}. Controlla l’anteprima e premi Invia manualmente.`);
+    await desktopBridge.reveal_pdf_in_explorer(kind, generated.path);
+    showToast(`PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} pronto: ${filename}. In Esplora file scegli Condividi → WhatsApp, verifica destinatario e allegato, poi invia manualmente.`);
   } catch (error) {
     const filename = generated?.path ? generated.path.split(/[\\/]/).pop() : '';
-    const fallback = filename ? ` PDF salvato: ${filename}. Allegalo manualmente nella chat.` : '';
-    showToast(`${whatsappOpened ? 'PDF non allegato' : 'WhatsApp non aperto'}: ${error.message}.${fallback}`, true);
+    const fallback = generated?.path ? ` PDF salvato in: ${generated.path}. Aprilo manualmente.` : '';
+    showToast(`${filename ? `Condivisione non preparata per ${filename}` : 'Condivisione non preparata'}: ${error.message}.${fallback}`, true);
   }
 }
 

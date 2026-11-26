@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from desktop_app import DesktopApi, launch_whatsapp_uri
+from desktop_app import DesktopApi
 from desktop_app import configure_app_logging
 from local_store import LocalStore
 
@@ -119,28 +119,42 @@ class DesktopApiTests(unittest.TestCase):
         self.assertFalse(hasattr(self.api, "window"))
         self.assertEqual(set(dir(self.api)), DesktopApi.EXPOSED_METHODS)
 
-    def test_open_whatsapp_launches_desktop_protocol_with_phone_only(self):
-        with patch("desktop_app.launch_whatsapp_uri") as launch_uri:
-            result = self.api.open_whatsapp("+39 333 123 4567")
+    def test_legacy_whatsapp_launch_and_attachment_automation_are_not_exposed(self):
+        self.assertNotIn("open_whatsapp", DesktopApi.EXPOSED_METHODS)
+        self.assertNotIn("attach_whatsapp_pdf", DesktopApi.EXPOSED_METHODS)
+
+    def test_reveal_pdf_in_explorer_selects_valid_customer_pdf_in_configured_folder(self):
+        customer_dir = self.root / "pdf cliente"
+        customer_dir.mkdir()
+        self.store.set_output_folder("customer", customer_dir)
+        pdf_path = customer_dir / "preventivo cliente.pdf"
+        pdf_path.write_bytes(b"%PDF-1.7 sample")
+
+        with patch("desktop_app.subprocess.Popen") as popen:
+            result = self.api.reveal_pdf_in_explorer("customer", str(pdf_path), platform_name="nt")
 
         self.assertEqual(result, {"ok": True})
-        launch_uri.assert_called_once_with("whatsapp://send?phone=393331234567")
+        popen.assert_called_once_with(["explorer.exe", f"/select,{pdf_path.resolve()}"])
 
-    def test_open_whatsapp_rejects_invalid_phone(self):
-        with self.assertRaisesRegex(ValueError, "numero"):
-            self.api.open_whatsapp("123")
+    def test_reveal_pdf_in_explorer_selects_supplier_pdf_from_supplier_folder(self):
+        supplier_dir = self.root / "pdf fornitore"
+        supplier_dir.mkdir()
+        self.store.set_output_folder("supplier", supplier_dir)
+        pdf_path = supplier_dir / "preventivo fornitore.pdf"
+        pdf_path.write_bytes(b"%PDF-1.7 sample")
 
-    def test_open_whatsapp_preserves_italian_city_code_zero_after_country_prefix(self):
-        with patch("desktop_app.launch_whatsapp_uri") as launch_uri:
-            self.api.open_whatsapp("+39 (0)2 1234 5678")
+        with patch("desktop_app.subprocess.Popen") as popen:
+            self.api.reveal_pdf_in_explorer("supplier", str(pdf_path), platform_name="nt")
 
-        launch_uri.assert_called_once_with("whatsapp://send?phone=390212345678")
+        popen.assert_called_once_with(["explorer.exe", f"/select,{pdf_path.resolve()}"])
 
-    def test_attach_whatsapp_pdf_requires_explicit_recipient_confirmation(self):
-        with self.assertRaisesRegex(ValueError, "[Cc]onferma"):
-            self.api.attach_whatsapp_pdf("customer", "/tmp/preventivo.pdf", False)
+    def test_reveal_pdf_in_explorer_rejects_invalid_kind_and_unconfigured_folder(self):
+        with self.assertRaisesRegex(ValueError, "[Tt]ipo"):
+            self.api.reveal_pdf_in_explorer("other", "/tmp/preventivo.pdf", platform_name="nt")
+        with self.assertRaisesRegex(ValueError, "cartella"):
+            self.api.reveal_pdf_in_explorer("customer", "/tmp/preventivo.pdf", platform_name="nt")
 
-    def test_attach_whatsapp_pdf_rejects_paths_outside_the_configured_customer_folder(self):
+    def test_reveal_pdf_in_explorer_rejects_path_outside_configured_folder(self):
         customer_dir = self.root / "pdf cliente"
         customer_dir.mkdir()
         self.store.set_output_folder("customer", customer_dir)
@@ -148,42 +162,36 @@ class DesktopApiTests(unittest.TestCase):
         elsewhere.write_bytes(b"%PDF-1.7 sample")
 
         with self.assertRaisesRegex(ValueError, "cartella"):
-            self.api.attach_whatsapp_pdf("customer", str(elsewhere), True)
+            self.api.reveal_pdf_in_explorer("customer", str(elsewhere), platform_name="nt")
 
-    def test_attach_whatsapp_pdf_rejects_wrong_extension_and_non_pdf_content(self):
+    def test_reveal_pdf_in_explorer_rejects_missing_or_non_pdf_file(self):
         customer_dir = self.root / "pdf cliente"
         customer_dir.mkdir()
         self.store.set_output_folder("customer", customer_dir)
+        invalid_pdf = customer_dir / "preventivo.pdf"
+        invalid_pdf.write_bytes(b"not a PDF")
         wrong_extension = customer_dir / "preventivo.txt"
         wrong_extension.write_bytes(b"%PDF-1.7 sample")
-        invalid_pdf = customer_dir / "preventivo.pdf"
-        invalid_pdf.write_bytes(b"not a pdf")
 
+        with self.assertRaisesRegex(FileNotFoundError, "non esiste"):
+            self.api.reveal_pdf_in_explorer("customer", str(customer_dir / "missing.pdf"), platform_name="nt")
         with self.assertRaisesRegex(ValueError, "PDF"):
-            self.api.attach_whatsapp_pdf("customer", str(wrong_extension), True)
+            self.api.reveal_pdf_in_explorer("customer", str(invalid_pdf), platform_name="nt")
         with self.assertRaisesRegex(ValueError, "PDF"):
-            self.api.attach_whatsapp_pdf("customer", str(invalid_pdf), True)
+            self.api.reveal_pdf_in_explorer("customer", str(wrong_extension), platform_name="nt")
 
-    def test_attach_whatsapp_pdf_delegates_only_a_valid_configured_pdf_to_driver(self):
+    def test_reveal_pdf_in_explorer_rejects_non_windows_and_reports_explorer_errors(self):
         customer_dir = self.root / "pdf cliente"
         customer_dir.mkdir()
         self.store.set_output_folder("customer", customer_dir)
-        pdf_path = customer_dir / "preventivo_cliente.pdf"
+        pdf_path = customer_dir / "preventivo.pdf"
         pdf_path.write_bytes(b"%PDF-1.7 sample")
-        attached = []
-        api = DesktopApi(self.store, whatsapp_attacher=attached.append)
 
-        result = api.attach_whatsapp_pdf("customer", str(pdf_path), True)
-
-        self.assertEqual(result, {"ok": True})
-        self.assertEqual(attached, [pdf_path.resolve()])
-
-    def test_open_whatsapp_reports_non_windows_or_missing_protocol_handler(self):
         with self.assertRaisesRegex(RuntimeError, "Windows"):
-            launch_whatsapp_uri("whatsapp://send?phone=393331234567", platform_name="darwin")
-        with patch("desktop_app.os.startfile", create=True) as startfile:
-            launch_whatsapp_uri("whatsapp://send?phone=393331234567", platform_name="nt")
-        startfile.assert_called_once_with("whatsapp://send?phone=393331234567")
+            self.api.reveal_pdf_in_explorer("customer", str(pdf_path), platform_name="darwin")
+        with patch("desktop_app.subprocess.Popen", side_effect=OSError("Explorer unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "Esplora file"):
+                self.api.reveal_pdf_in_explorer("customer", str(pdf_path), platform_name="nt")
 
     def test_frontend_log_accepts_only_event_codes_and_omits_client_text(self):
         logger, log_path = configure_app_logging(self.root / "logs")

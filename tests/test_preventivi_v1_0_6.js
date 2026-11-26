@@ -183,25 +183,24 @@ test('customer and supplier send timestamps are independent', async () => {
   assert.equal(quote.sentSupplierAt, null);
 });
 
-test('opening WhatsApp does not mark a quote sent', async () => {
+test('opening the selected PDF for Windows Share does not mark a quote sent', async () => {
   const share = extractFunction('shareQuotePdfViaWhatsApp');
   assert.ok(share, 'Il flusso WhatsApp del preventivo deve esistere.');
   const quote = { sentCustomerAt: null, sentSupplierAt: null };
   const bridgeCalls = [];
+  const toasts = [];
   const sandbox = {
-    desktopBridge: { open_whatsapp: async (...args) => { bridgeCalls.push(args); } },
-    window: { prompt: () => '333 123 4567' },
+    desktopBridge: { reveal_pdf_in_explorer: async (...args) => { bridgeCalls.push(args); } },
     getQuote: () => quote,
-    activeClient: () => ({ phone: '+393331234567' }),
-    normalizePhoneNumber: runPhoneNormalizer,
     generateQuotePdf: async () => ({ path: 'C:/pdf/quote.pdf' }),
-    showToast() {}
+    showToast: message => toasts.push(message)
   };
   vm.runInNewContext(`${share}\nthis.shareQuotePdfViaWhatsApp = shareQuotePdfViaWhatsApp;`, sandbox);
 
   await sandbox.shareQuotePdfViaWhatsApp('customer');
 
-  assert.deepEqual(bridgeCalls, [['+393331234567']]);
+  assert.deepEqual(bridgeCalls, [['customer', 'C:/pdf/quote.pdf']]);
+  assert.match(toasts[0], /Condividi.*WhatsApp/);
   assert.equal(quote.sentCustomerAt, null);
   assert.equal(quote.sentSupplierAt, null);
 });

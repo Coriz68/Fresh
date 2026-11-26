@@ -19,9 +19,9 @@ Per l'aggiornamento in-place dalla 1.0.5, avvia il setup 1.0.6 sul computer che 
 
 ## Allegare un PDF a WhatsApp
 
-I pulsanti WhatsApp generano e salvano il PDF nella cartella configurata, quindi aprono la chat del destinatario. Controlla il numero e la chat mostrati da WhatsApp; torna al gestionale e conferma l'allegato solo se la chat è corretta. Il gestionale usa i controlli standard di WhatsApp Desktop per scegliere **Allega > Documento** e apre il PDF salvato. WhatsApp mostra l'anteprima: controllala e premi **Invia** manualmente. Il gestionale non invia il messaggio e non modifica gli appunti di Windows.
+I pulsanti WhatsApp generano e salvano il PDF nella cartella configurata, quindi aprono Esplora file con quel PDF selezionato. In Esplora file scegli **Condividi > WhatsApp**, seleziona il destinatario e controlla il documento nella schermata di composizione prima di premere **Invia**. Il gestionale non apre WhatsApp direttamente, non modifica gli appunti e non invia il messaggio.
 
-Se non trova una sola finestra WhatsApp o i controlli attesi, l'operazione si interrompe senza inviare nulla. Il PDF resta nella cartella e puoi allegarlo dalla chat con **Allega > Documento**. Su macOS l'allegato è manuale. L'automazione Windows usa `pywinauto`, una dipendenza gratuita e open source inclusa nel pacchetto; non richiede abbonamenti, API a pagamento o servizi esterni.
+Se WhatsApp non compare tra le destinazioni di condivisione, il PDF resta nella cartella configurata: apri la chat, scegli **Allega > Documento** e seleziona il file. Il flusso non richiede servizi o API a pagamento.
 
 ## Ottenere il pacchetto
 
