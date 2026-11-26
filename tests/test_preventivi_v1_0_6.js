@@ -184,7 +184,7 @@ test('quote list shows independent PDF send statuses', () => {
   assert.match(markup, /Non inviato/);
 });
 
-test('supplier module data excludes client identity while customer data retains it', () => {
+test('supplier module data retains client name and existing module data', () => {
   const mapper = extractFunction('quoteModuleData');
   assert.ok(mapper, 'Il flusso di preparazione dei moduli deve separare i dati per destinazione PDF.');
   const sandbox = {
@@ -199,8 +199,89 @@ test('supplier module data excludes client identity while customer data retains 
   const supplier = sandbox.quoteModuleData('supplier', originalData, client, quote);
   const customer = sandbox.quoteModuleData('customer', originalData, client, quote);
 
-  assert.equal(supplier.cliente, '');
+  assert.equal(supplier.cliente, 'Cliente Riservato');
   assert.equal(supplier.riferimento, quote.number);
   assert.equal(customer.cliente, 'Cliente Riservato');
   assert.deepEqual(JSON.parse(JSON.stringify(originalData)), { larghezza: 300, cliente: 'Dato legacy' });
+});
+
+test('duplicateQuote preserves quote data with a new identity', () => {
+  const duplicate = extractFunction('duplicateQuote');
+  assert.ok(duplicate, 'La copia del preventivo deve essere creata da una funzione dedicata.');
+  const original = {
+    id: 'quote-original', number: 'PREV-2026-0042', createdAt: '2026-01-01', updatedAt: '2026-01-02',
+    status: 'inviato', clientId: 'client-1', clientSnapshot: { name: 'Cliente' }, validityDays: 30,
+    vatRate: 22, notes: 'Note originali', items: [{ id: 'item-1', moduleId: 'tenda', data: { misura: { width: 300 } }, price: 1200 }],
+    sentCustomerAt: '2026-11-25T10:00:00.000Z', sentSupplierAt: '2026-11-25T11:00:00.000Z'
+  };
+  const sandbox = {
+    state: { quotes: [original] },
+    structuredClone,
+    makeId: () => 'quote-copy',
+    localDateString: () => '2026-11-26',
+    Date
+  };
+  vm.runInNewContext(`${duplicate}\nthis.duplicateQuote = duplicateQuote;`, sandbox);
+
+  const copy = sandbox.duplicateQuote(original);
+
+  assert.equal(copy.id, 'quote-copy');
+  assert.equal(copy.number, 'PREV-2026-0042-COPIA-001');
+  assert.equal(copy.status, 'bozza');
+  assert.equal(copy.notes, original.notes);
+  assert.deepEqual(JSON.parse(JSON.stringify(copy.items)), JSON.parse(JSON.stringify(original.items)));
+  assert.equal(copy.createdAt, '2026-11-26');
+  assert.equal(copy.updatedAt, '2026-11-26');
+  assert.equal(original.number, 'PREV-2026-0042');
+  assert.equal(original.status, 'inviato');
+});
+
+test('duplicateQuote clears both send timestamps', () => {
+  const duplicate = extractFunction('duplicateQuote');
+  assert.ok(duplicate, 'La copia del preventivo deve essere creata da una funzione dedicata.');
+  const original = { id: 'q1', number: 'PREV-2026-0001', sentCustomerAt: '2026-01-01', sentSupplierAt: '2026-01-02', items: [] };
+  const sandbox = { state: { quotes: [original] }, structuredClone, makeId: () => 'q2', localDateString: () => '2026-11-26', Date };
+  vm.runInNewContext(`${duplicate}\nthis.duplicateQuote = duplicateQuote;`, sandbox);
+
+  const copy = sandbox.duplicateQuote(original);
+
+  assert.equal(copy.sentCustomerAt, null);
+  assert.equal(copy.sentSupplierAt, null);
+});
+
+test('duplicateQuote copies nested module data independently', () => {
+  const duplicate = extractFunction('duplicateQuote');
+  assert.ok(duplicate, 'La copia del preventivo deve essere creata da una funzione dedicata.');
+  const original = { id: 'q1', number: 'PREV-2026-0001', items: [{ id: 'i1', data: { misura: { width: 300 } } }] };
+  const sandbox = { state: { quotes: [original] }, structuredClone, makeId: () => 'q2', localDateString: () => '2026-11-26', Date };
+  vm.runInNewContext(`${duplicate}\nthis.duplicateQuote = duplicateQuote;`, sandbox);
+
+  const copy = sandbox.duplicateQuote(original);
+  copy.items[0].data.misura.width = 999;
+
+  assert.equal(original.items[0].data.misura.width, 300);
+});
+
+test('duplicateQuote generates a unique number across the archive', () => {
+  const duplicate = extractFunction('duplicateQuote');
+  assert.ok(duplicate, 'La copia del preventivo deve essere creata da una funzione dedicata.');
+  const original = { id: 'q1', number: 'PREV-2026-0001', items: [] };
+  const sandbox = {
+    state: { quotes: [original, { number: 'PREV-2026-0001-COPIA-001' }] },
+    structuredClone,
+    makeId: () => 'q3',
+    localDateString: () => '2026-11-26',
+    Date
+  };
+  vm.runInNewContext(`${duplicate}\nthis.duplicateQuote = duplicateQuote;`, sandbox);
+
+  const copy = sandbox.duplicateQuote(original);
+
+  assert.equal(copy.number, 'PREV-2026-0001-COPIA-002');
+});
+
+test('quote editor exposes a duplicate action wired separately from save', () => {
+  assert.match(source, /data-action="duplicate-quote"/);
+  assert.match(source, /action === 'duplicate-quote'/);
+  assert.match(source, /data-action="save-quote"/);
 });

@@ -10,7 +10,7 @@ Aggiornare il gestionale preventivi dalla base `v1.0.5`, migliorando la preparaz
 - Il prodotto è una desktop app Python + pywebview + HTML/CSS/JavaScript, non Electron/React/TypeScript/SQLite.
 - Clienti, preventivi, listino e impostazioni aziendali sono salvati in `preventivi.json` scelto dall’utente. Le preferenze dei percorsi sono in `settings.json` sotto `AreaTendaPreventivi` nella cartella dati utente. I PDF cliente e fornitore hanno percorsi separati.
 - L’invio WhatsApp apre oggi `https://wa.me/` nel browser con un messaggio. La generazione PDF è nel front-end e il bridge Python salva il PDF su disco.
-- Il PDF fornitore assembla le sole pagine dei moduli; il riepilogo cliente e gli importi restano nel PDF cliente.
+- Il PDF fornitore assembla le sole pagine dei moduli e, come in 1.0.5, mantiene visibili nome cliente, riferimento e dati compilati nei moduli; riepilogo commerciale, prezzi, totali e altri recapiti/dati fiscali del cliente restano esclusi.
 
 ## Obiettivi
 
@@ -20,6 +20,7 @@ Aggiornare il gestionale preventivi dalla base `v1.0.5`, migliorando la preparaz
 - Accettare cellulare vuoto; normalizzare i numeri italiani con `+39`, accettare numeri internazionali in formato coerente e mostrare errori formali in anagrafica. La validità formale non dichiara l’esistenza dell’account WhatsApp.
 - Duplicare dal preventivo aperto con nuovo ID e numero, mantenere i dati commerciali e i moduli, azzerare i metadati di invio e lasciare indipendenti originale e copia.
 - Sostituire i riferimenti di autore/brand visibili con `CorradoWEB 2026`; mantenere i nomi tecnici e i percorsi legacy necessari a leggere installazioni e archivi esistenti.
+- Conservare nel PDF fornitore il nome cliente e tutti i dati dei moduli che già apparivano in 1.0.5, escludendo prezzi, totali, riepilogo e contatti/anagrafica ulteriori.
 - Conservare e verificare i dati al primo avvio aggiornato; fare una copia di sicurezza dell’archivio prima di scriverne una migrazione e non sovrascrivere dati non validi.
 
 ## Non obiettivi
@@ -57,6 +58,6 @@ Aggiornare il gestionale preventivi dalla base `v1.0.5`, migliorando la preparaz
 
 ## Collaudo e limiti
 
-- Eseguire i test Python e JavaScript già presenti e aggiungere test mirati per validazione, duplicazione, timestamp, migrazione/backup, URI, branding e separazione PDF.
+- Eseguire i test Python e JavaScript già presenti e aggiungere test mirati per validazione, duplicazione, timestamp, migrazione/backup, URI, branding e separazione PDF. Verificare che il PDF fornitore mantenga nome cliente e campi modulo senza importi.
 - L’host di sviluppo è macOS: può eseguire test unitari, controllare il sorgente e verificare il build script. Non può dimostrare l’apertura di WhatsApp Desktop, il focus della conversazione, l’installazione sopra 1.0.5 o l’installer su Windows reale.
 - Non allegare né inviare documenti reali nei test. Non pubblicare tag/release o fare push del branch.

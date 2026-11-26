@@ -140,12 +140,13 @@ test('PDF cliente: una nota di un milione di caratteri viene accorciata rapidame
   assert.ok(harness.pages[0].drawTextCalls.some(call => call.text.startsWith('NOTE: X') && call.text.endsWith('...')));
 });
 
-test('PDF fornitore: metadati senza anagrafica cliente o prezzi', async () => {
+test('PDF fornitore: conserva cliente e riferimento senza metadati commerciali', async () => {
   const harness = makePdfHarness();
 
   await harness.window.buildSupplierPdfDocument([], 'PREV-2026-0042', 'Cliente Riservato');
 
-  assert.doesNotMatch(harness.metadata.title, /Cliente Riservato/);
-  assert.doesNotMatch(harness.metadata.subject, /Cliente Riservato|Cliente:/);
+  assert.match(harness.metadata.title, /Cliente Riservato/);
+  assert.match(harness.metadata.subject, /Cliente Riservato/);
+  assert.match(harness.metadata.subject, /PREV-2026-0042/);
   assert.doesNotMatch(harness.metadata.title + harness.metadata.subject, /\b(?:totale|prezzo|€)\b/i);
 });

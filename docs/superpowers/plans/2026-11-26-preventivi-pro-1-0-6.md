@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Base commit is tag `v1.0.5` (`2af16c336bacc9c6db5c13b2d24f4e80b12bffaf`); work on branch `feat/preventivi-pro-1.0.6`.
-- Preserve original/client PDF layout, quote calculations, product modules, quote editing/saving, separate output paths, and supplier PDF privacy.
+- Preserve original/client PDF layout, quote calculations, product modules, quote editing/saving, separate output paths, and supplier PDF privacy: supplier document keeps client name and preexisting module data, but excludes prices/totals and other client contact/tax fields.
 - Preserve `AppId`, executable identity, legacy settings/database directories and filenames, JSON backup format, IndexedDB name/version, and module message channel.
 - WhatsApp opens only through `whatsapp://send?phone=...` on Windows; no text or actual send automation. Attachment and send remain operator actions.
 - Send timestamps are recorded only after explicit operator confirmation.
@@ -25,10 +25,10 @@
 
 - Invalid/corrupt existing JSON or unwritable backup path: startup must leave the original archive intact and report failure; Task 1 tests this.
 - Legacy and international phone formats, empty values, and numbers outside supported E.164 length: validation must be predictable without claiming WhatsApp registration; Task 2 tests this.
-- Supplier PDF sending and timestamps must not accidentally update customer state or expose customer prices/data; Tasks 3 and 4 test recipient/PDF-kind separation and supplier PDF regression.
+- Supplier PDF sending and timestamps must not accidentally update customer state or expose prices/totals; Task 4 verifies client name/reference and existing module data remain visible.
 - Duplicate quote must not mutate the original or carry send metadata; Task 5 tests deep-copy independence and reset behavior.
 - Upgrade must retain data locations, installer identity and compatibility strings while visible branding changes; Tasks 6 and 7 test those invariants.
-- Final source review must inspect the complete diff for unintended formula/PDF layout changes, customer data in supplier PDFs, stale visible Area Tenda identity, and changes to compatibility identifiers.
+- Final source review must inspect the complete diff for unintended formula/PDF layout changes, prices/totals in supplier PDFs, stale visible Area Tenda identity, and changes to compatibility identifiers.
 
 ---
 
@@ -82,18 +82,18 @@
 
 **Files:**
 - Modify: `gestionale.js`, `gestionale.css`, `gestionale-pdf.js`
-- Test: `tests/test_preventivi_v1_0_6.js`
+- Test: `tests/test_preventivi_v1_0_6.js`, `tests/test_whatsapp_share.js`
 - Regression: `tests/test_quote_pdf_layout.js`
 
 **Interfaces:**
 - Consumes: Task 1 fields `sentCustomerAt` / `sentSupplierAt`; Task 3 `open_whatsapp(phone)`.
 - Produces: independent “Segna PDF cliente inviato” and “Segna PDF fornitore inviato” actions that record `new Date().toISOString()` only after a second explicit confirmation. WhatsApp handoff generates/saves only the selected PDF, passes only the selected normalized recipient, and tells the operator to attach the file and return to confirm.
 
-- [x] **Step 1: Write failing tests** `customer and supplier send timestamps are independent`, `opening WhatsApp does not mark a quote sent`, `cancelled manual confirmation does not mark sent`, `confirmed send stores an ISO timestamp`, `quote list shows independent PDF send statuses`, `WhatsApp handoff supplies customer phone and no message`, `supplier module data excludes client identity while customer data retains it`, and `PDF supplier metadata omits client identity and prices`. Assert the untouched timestamp remains null.
+- [x] **Step 1: Write failing tests** `customer and supplier send timestamps are independent`, `opening WhatsApp does not mark a quote sent`, `cancelled manual confirmation does not mark sent`, `confirmed send stores an ISO timestamp`, `quote list shows independent PDF send statuses`, `WhatsApp handoff supplies customer phone and no message`, `supplier module data retains client name and existing module data`, and `PDF supplier metadata retains client name/reference without commercial amounts`. Assert the untouched timestamp remains null.
 - [x] **Step 2: Run** `node --test tests/test_preventivi_v1_0_6.js`. Expected: failures because state/actions are absent or message is still generated.
-- [x] **Step 3: Implement** separate status badges in editor and quote list, separate manual confirmation actions, optional recipient entry for supplier/no client phone, and the text-free WhatsApp flow. Ensure supplier module data and PDF metadata contain no customer identity; keep the visual structure and pricing calculations unchanged.
+- [x] **Step 3: Implement** separate status badges in editor and quote list, separate manual confirmation actions, optional recipient entry for supplier/no client phone, and the text-free WhatsApp flow. Preserve supplier client name and existing module data while keeping prices, totals and other client contact/tax fields out of that PDF.
 - [x] **Step 4: Run** the new JS tests. Expected: all handoff and confirmation cases pass.
-- [x] **Step 5: Run** `node --test tests/*.js`. Expected: all JavaScript tests pass and supplier PDF contains no customer totals/prices.
+- [x] **Step 5: Run** `node --test tests/*.js`. Expected: all JavaScript tests pass and supplier PDF retains client/module reference without prices or totals.
 
 ### Task 5: Duplicate an edited quote safely
 
@@ -104,11 +104,11 @@
 **Interfaces:**
 - Produces: `duplicateQuote(sourceQuote) -> quote`, with deep-copied commercial fields/items, unique ID and `-COPIA-NNN` number, current creation/update date, draft status, and null send timestamps.
 
-- [ ] **Step 1: Write failing tests** `duplicateQuote preserves quote data with a new identity`, `duplicateQuote clears both send timestamps`, `duplicateQuote copies nested module data independently`, and `duplicateQuote generates a unique number across the archive`. Assert editing nested copied item data leaves the original unchanged and collisions increment the global copy suffix.
-- [ ] **Step 2: Run** the new JS test file. Expected: failures because duplication is absent.
-- [ ] **Step 3: Implement** the pure duplicate helper and add a `Duplica preventivo` button in the open quote editor. Save the copy independently; leave ordinary save behavior unchanged.
-- [ ] **Step 4: Run** the new JS tests. Expected: all duplication cases pass.
-- [ ] **Step 5: Run** `node --test tests/*.js`. Expected: all JavaScript tests pass.
+- [x] **Step 1: Write failing tests** `duplicateQuote preserves quote data with a new identity`, `duplicateQuote clears both send timestamps`, `duplicateQuote copies nested module data independently`, and `duplicateQuote generates a unique number across the archive`. Assert editing nested copied item data leaves the original unchanged and collisions increment the global copy suffix.
+- [x] **Step 2: Run** the new JS test file. Expected: failures because duplication is absent.
+- [x] **Step 3: Implement** the pure duplicate helper and add a `Duplica preventivo` button in the open quote editor. Save the copy independently; leave ordinary save behavior unchanged.
+- [x] **Step 4: Run** the new JS tests. Expected: all duplication cases pass.
+- [x] **Step 5: Run** `node --test tests/*.js`. Expected: all JavaScript tests pass.
 
 ### Task 6: Replace visible identity and PDF metadata
 

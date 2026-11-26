@@ -288,7 +288,7 @@ function activeClient(quote) {
 function quoteModuleData(kind, originalData, client, quote) {
   return {
     ...structuredClone(originalData || {}),
-    cliente: kind === 'customer' ? (client.name || client.company || '') : '',
+    cliente: client.name || client.company || '',
     riferimento: quote.number
   };
 }
@@ -561,6 +561,7 @@ function renderQuote() {
       <aside class="card quote-side">
         <div class="card-head"><div><h2>${esc(quote.number)}</h2><p>Creato il ${dateLabel(quote.createdAt)}</p></div><span class="status ${quoteStatusClass(quote.status)}">${esc(quote.status || 'bozza')}</span></div>
         ${quoteSendStatusMarkup(quote)}
+        <button class="button" data-action="duplicate-quote">Duplica preventivo</button>
         <button class="button primary" data-action="generate-pdf" data-kind="customer">Genera PDF cliente completo</button>
         <button class="button" data-action="generate-pdf" data-kind="supplier">Genera PDF fornitore · soli moduli</button>
         ${desktopBridge ? `<button class="button" data-action="share-pdf-whatsapp" data-kind="customer" ${storagePaths.customer_pdf_dir ? '' : 'disabled'}>Invia PDF cliente con WhatsApp</button>
@@ -683,6 +684,46 @@ function newQuote() {
   currentPage = 'quote';
   persistNow();
   render();
+}
+
+function duplicateQuote(sourceQuote) {
+  const sourceNumber = String(sourceQuote.number || 'PREVENTIVO').replace(/-COPIA-\d+$/i, '');
+  const existingNumbers = new Set(state.quotes.map(quote => String(quote.number || '')));
+  let sequence = 1;
+  let number;
+  do {
+    number = `${sourceNumber}-COPIA-${String(sequence).padStart(3, '0')}`;
+    sequence++;
+  } while (existingNumbers.has(number));
+  const today = localDateString(new Date());
+  return {
+    ...structuredClone(sourceQuote),
+    id: makeId(),
+    number,
+    createdAt: today,
+    updatedAt: today,
+    status: 'bozza',
+    sentCustomerAt: null,
+    sentSupplierAt: null
+  };
+}
+
+async function duplicateCurrentQuote() {
+  const sourceQuote = getQuote();
+  if (!sourceQuote) return;
+  const sourceId = currentQuoteId;
+  const copy = duplicateQuote(sourceQuote);
+  state.quotes.unshift(copy);
+  currentQuoteId = copy.id;
+  currentPage = 'quote';
+  if (!await persistNow()) {
+    state.quotes = state.quotes.filter(quote => quote.id !== copy.id);
+    currentQuoteId = sourceId;
+    renderQuote();
+    return;
+  }
+  renderQuote();
+  showToast(`Creato ${copy.number}. L’originale non è stato modificato.`);
 }
 
 async function loadModuleFrame(model) {
@@ -969,7 +1010,7 @@ async function generateQuotePdf(kind = 'customer') {
         showPdfProgress('Unisco le pagine dei moduli…');
         const supplierBuilder = frame.contentWindow?.buildSupplierPdfDocument;
         if (typeof supplierBuilder !== 'function') throw new Error('Generatore PDF fornitore non disponibile.');
-        bytes = await supplierBuilder(modulePdfs, quote.number);
+        bytes = await supplierBuilder(modulePdfs, quote.number, client.name || client.company || '');
       }
       generatedPdfBytes = bytes;
       generatedPdfKind = kind;
@@ -1113,6 +1154,7 @@ function handleClick(event) {
     currentQuoteId = id;
     setPage('quote');
   } else if (action === 'delete-quote') removeQuote(id);
+  else if (action === 'duplicate-quote') duplicateCurrentQuote();
   else if (action === 'back-quotes') setPage('quotes');
   else if (action === 'new-client') openClientDialog();
   else if (action === 'edit-client') openClientDialog(getClient(id));
