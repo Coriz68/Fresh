@@ -457,7 +457,7 @@ function renderCompany() {
       </div>
     </section>
     <section class="card">
-      <div class="card-head"><div><h2>Intestazione e impostazioni PDF</h2><p>Questi dati sostituiscono l’intestazione AREA TENDA nel riepilogo cliente.</p></div><button class="button primary" data-action="save-company">Salva impostazioni</button></div>
+      <div class="card-head"><div><h2>Intestazione e impostazioni PDF</h2><p>Questi dati definiscono l’intestazione aziendale nel riepilogo cliente.</p></div><button class="button primary" data-action="save-company">Salva impostazioni</button></div>
       <div class="form-grid">
         <div class="field"><label>RAGIONE SOCIALE / NOME AZIENDA</label><input data-company="name" value="${esc(company.name)}" placeholder="Nome della tua azienda"></div>
         <div class="field"><label>PARTITA IVA</label><input data-company="vatNumber" value="${esc(company.vatNumber)}"></div>

@@ -18,7 +18,7 @@
 - WhatsApp opens only through `whatsapp://send?phone=...` on Windows; no text or actual send automation. Attachment and send remain operator actions.
 - Send timestamps are recorded only after explicit operator confirmation.
 - Phone is optional; validate and normalize form only. No network lookup, paid API, dependency, or assertion of WhatsApp registration.
-- No release/tag/push or real customer data. No new orders, work orders, inventory, delivery or installation features.
+- No release/tag/publish or real customer data. The user explicitly authorized pushing the feature branch to GitHub for Windows verification and issue coordination. No new orders, work orders, inventory, delivery or installation features.
 - Optional enhancements from request section 8 are analysis only.
 
 ## Review Focus
@@ -117,11 +117,11 @@
 - Preserve: `local_store.py`, IndexedDB/channel/backup format identifiers, `AppId`, data directory names, module serialization keys.
 - Test: `tests/test_preventivi_v1_0_6.js`, `tests/test_quote_pdf_layout.js`
 
-- [ ] **Step 1: Write failing tests** `visible application identity is CorradoWEB 2026`, `legacy storage and protocol identifiers stay stable`, and `generated PDFs identify CorradoWEB 2026 as author`. Assert visible branding and PDF author/creator values while checking compatibility strings remain.
-- [ ] **Step 2: Run** the focused Node tests. Expected: branding assertions fail against current Area Tenda identity and missing author metadata.
-- [ ] **Step 3: Implement** exact `CorradoWEB 2026` visible authorship, PDF metadata and Windows publisher/version identity; replace only user-facing Area Tenda references. Set application/package/installer version to 1.0.6 while retaining technical compatibility identifiers and the same installer AppId/install directory.
-- [ ] **Step 4: Run** focused identity/PDF tests. Expected: pass.
-- [ ] **Step 5: Run** all JavaScript tests. Expected: pass, including unchanged PDF structure/totals.
+- [x] **Step 1: Write failing tests** `visible application identity is CorradoWEB 2026`, `legacy storage and protocol identifiers stay stable`, and `generated PDFs identify CorradoWEB 2026 as author`. Assert visible branding and PDF author/creator values while checking compatibility strings remain.
+- [x] **Step 2: Run** the focused Node tests. Expected: branding assertions fail against current Area Tenda identity and missing author metadata.
+- [x] **Step 3: Implement** exact `CorradoWEB 2026` visible authorship, PDF metadata and Windows publisher/version identity; replace only user-facing Area Tenda references. Set application/package/installer version to 1.0.6 while retaining technical compatibility identifiers and the same installer AppId/install directory.
+- [x] **Step 4: Run** focused identity/PDF tests. Expected: pass.
+- [x] **Step 5: Run** all JavaScript tests. Expected: pass, including unchanged PDF structure/totals.
 
 ### Task 7: Verify upgrade configuration and handoff
 
@@ -129,9 +129,9 @@
 - Modify: `.github/workflows/*`, `README_WINDOWS_MAC.md`, `Istruzioni_gestionale.txt`, `docs/INSTALLAZIONE_WINDOWS.md`, `docs/superpowers/specs/2026-11-26-preventivi-pro-1-0-6-design.md`
 - Test: `tests/test_preventivi_v1_0_6.js`, existing Python/JavaScript suites
 
-- [ ] **Step 1: Write failing checks** for 1.0.6 version consistency, stable `AppId` and install/data paths, no updater configuration, and supplier PDF privacy. Expected: checks fail on 1.0.5 metadata or missing 1.0.6 upgrade instructions.
-- [ ] **Step 2: Implement** versioned workflow artifact and documentation. Confirm Inno Setup installs to the same path with `ignoreversion`; no automatic updater is added. Document backup/migration behavior and Windows-only manual checks.
-- [ ] **Step 3: Run** `python3 -m unittest discover -s tests -v` and `node --test tests/*.js`. Expected: both suites pass.
-- [ ] **Step 4: Run** source-level package checks for all 32 modules and matching `1.0.6` strings. Expected: all module resources present and version metadata consistent.
-- [ ] **Step 5: Record** that Windows installer generation, real 1.0.5 in-place upgrade, WhatsApp Desktop launch/recipient/focus/attachment and actual send confirmation require a Windows machine; do not tag, push, or publish.
+- [x] **Step 1: Write failing checks** for 1.0.6 version consistency, stable `AppId` and install/data paths, no updater configuration, and supplier PDF privacy. Expected: checks fail on 1.0.5 metadata or missing 1.0.6 upgrade instructions.
+- [x] **Step 2: Implement** versioned workflow artifact and documentation. Confirm Inno Setup installs to the same path with `ignoreversion`; no automatic updater is added. Document backup/migration behavior and Windows-only manual checks.
+- [x] **Step 3: Run** `python3 -m unittest discover -s tests -v` and `node --test tests/*.js`. Expected: both suites pass.
+- [x] **Step 4: Run** source-level package checks for all 32 modules and matching `1.0.6` strings. Expected: all module resources present and version metadata consistent.
+- [x] **Step 5: Record** that Windows installer generation, real 1.0.5 in-place upgrade, WhatsApp Desktop launch/recipient/focus/attachment and actual send confirmation require a Windows machine; do not tag or publish.
 

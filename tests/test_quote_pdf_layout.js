@@ -23,6 +23,7 @@ function makePdfHarness() {
     setTitle(value) { metadata.title = value; },
     setSubject(value) { metadata.subject = value; },
     setAuthor(value) { metadata.author = value; },
+    setCreator(value) { metadata.creator = value; },
     embedFont: async () => regular,
     embedPng: async () => logoSize,
     embedJpg: async () => logoSize,
@@ -78,9 +79,11 @@ const payload = {
 };
 
 test('PDF cliente: il logo Fresh è più grande e il riepilogo usa una gerarchia grafica professionale', async () => {
-  const { window, pages } = makePdfHarness();
+  const { window, pages, metadata } = makePdfHarness();
   await window.buildQuotePdfDocument(payload, []);
 
+  assert.equal(metadata.author, 'CorradoWEB 2026');
+  assert.equal(metadata.creator, 'CorradoWEB 2026');
   const [page] = pages;
   const [logo] = page.drawImageCalls;
   assert.ok(logo.height >= 100, `Il logo deve avere un’altezza di almeno 100 pt (attuale: ${logo.height}).`);
@@ -145,6 +148,8 @@ test('PDF fornitore: conserva cliente e riferimento senza metadati commerciali',
 
   await harness.window.buildSupplierPdfDocument([], 'PREV-2026-0042', 'Cliente Riservato');
 
+  assert.equal(harness.metadata.author, 'CorradoWEB 2026');
+  assert.equal(harness.metadata.creator, 'CorradoWEB 2026');
   assert.match(harness.metadata.title, /Cliente Riservato/);
   assert.match(harness.metadata.subject, /Cliente Riservato/);
   assert.match(harness.metadata.subject, /PREV-2026-0042/);

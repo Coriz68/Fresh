@@ -8,6 +8,60 @@ const vm = require('node:vm');
 const source = fs.readFileSync(new URL('../gestionale.js', `file://${__dirname}/`), 'utf8');
 const extractFunction = name => source.match(new RegExp(`(?:async )?function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`))?.[0];
 
+test('visible application identity is CorradoWEB 2026 across the app and all modules', () => {
+  const appHtml = fs.readFileSync(new URL('../Gestione_preventivi.html', `file://${__dirname}/`), 'utf8');
+  const catalogHtml = fs.readFileSync(new URL('../Apri_catalogo.html', `file://${__dirname}/`), 'utf8');
+  const moduleDirectory = new URL('../Moduli/', `file://${__dirname}/`);
+  const modules = fs.readdirSync(moduleDirectory).filter(file => file.endsWith('.html'));
+
+  assert.match(appHtml, /CorradoWEB 2026/);
+  assert.match(catalogHtml, /CorradoWEB 2026/);
+  assert.equal(modules.length, 32);
+  for (const moduleFile of modules) {
+    const html = fs.readFileSync(new URL(moduleFile, moduleDirectory), 'utf8');
+    assert.match(html, /CorradoWEB 2026/, `${moduleFile} deve mostrare la nuova identità`);
+    assert.match(html, /doc\.setAuthor\(['"]CorradoWEB 2026['"]\)/, `${moduleFile} deve impostare l'autore PDF`);
+    assert.match(html, /doc\.setCreator\(['"]CorradoWEB 2026['"]\)/, `${moduleFile} deve impostare il creatore PDF`);
+  }
+});
+
+test('legacy storage and installer identity identifiers stay stable', () => {
+  const localStore = fs.readFileSync(new URL('../local_store.py', `file://${__dirname}/`), 'utf8');
+  const installer = fs.readFileSync(new URL('../packaging/windows/GestionalePreventivi.iss', `file://${__dirname}/`), 'utf8');
+
+  assert.match(localStore, /AreaTendaPreventivi/);
+  assert.match(localStore, /preventivi\.json/);
+  assert.match(source, /area-tenda-preventivi/);
+  assert.match(source, /area-tenda-quote-manager/);
+  assert.match(source, /AREA_TENDA_GESTIONALE_BACKUP/);
+  assert.match(installer, /AppId=\{\{2A1F8B7C-0E51-48A1-965E-941B4C2376A0\}/);
+  assert.match(installer, /DefaultDirName=\{autopf\}\\Gestionale Preventivi/);
+});
+
+test('upgrade configuration is consistently 1.0.6, preserves install paths, and documents Windows checks', () => {
+  const installer = fs.readFileSync(new URL('../packaging/windows/GestionalePreventivi.iss', `file://${__dirname}/`), 'utf8');
+  const versionInfo = fs.readFileSync(new URL('../packaging/windows/version_info.txt', `file://${__dirname}/`), 'utf8');
+  const workflow = fs.readFileSync(new URL('../.github/workflows/windows-installer.yml', `file://${__dirname}/`), 'utf8');
+  const instructions = fs.readFileSync(new URL('../docs/INSTALLAZIONE_WINDOWS.md', `file://${__dirname}/`), 'utf8');
+  const manuals = [
+    fs.readFileSync(new URL('../README_WINDOWS_MAC.md', `file://${__dirname}/`), 'utf8'),
+    fs.readFileSync(new URL('../Istruzioni_gestionale.txt', `file://${__dirname}/`), 'utf8')
+  ];
+
+  assert.match(installer, /AppVersion "1\.0\.6"/);
+  assert.match(installer, /DefaultDirName=\{autopf\}\\Gestionale Preventivi/);
+  assert.match(installer, /Flags: ignoreversion/);
+  assert.match(versionInfo, /filevers=\(1, 0, 6, 0\)/);
+  assert.match(versionInfo, /ProductVersion', '1\.0\.6'/);
+  assert.match(workflow, /Gestionale-Preventivi-1\.0\.6-Windows-x64/);
+  assert.match(workflow, /-Filter \*\.html\)\.Count -ne 32/);
+  assert.match(instructions, /Gestionale Preventivi 1\.0\.6 Setup\.exe/);
+  assert.match(instructions, /aggiornamento in-place dalla 1\.0\.5/i);
+  assert.match(instructions, /non introduce un updater automatico/i);
+  assert.match(instructions, /Windows 10\/11/);
+  assert.ok(manuals.every(text => /1\.0\.6/.test(text)));
+});
+
 function runPhoneNormalizer(value) {
   const functionSource = extractFunction('normalizePhoneNumber');
   assert.ok(functionSource, 'Il normalizzatore puro deve esistere.');

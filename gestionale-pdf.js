@@ -6,7 +6,8 @@ window.buildQuotePdfDocument = async function (payload, modulePdfs) {
   const { company, client, quote, models } = payload;
   const pdf = await library.PDFDocument.create();
   pdf.setTitle(`Preventivo ${quote.number}`);
-  pdf.setAuthor(pdfSafeText(company.name));
+  pdf.setAuthor('CorradoWEB 2026');
+  pdf.setCreator('CorradoWEB 2026');
   const regular = await pdf.embedFont(library.StandardFonts.Helvetica);
   const bold = await pdf.embedFont(library.StandardFonts.HelveticaBold);
   const color = library.rgb;
@@ -138,6 +139,8 @@ window.buildSupplierPdfDocument = async function (modulePdfs, quoteNumber, clien
   const pdf = await library.PDFDocument.create();
   pdf.setTitle(`Moduli ${quoteNumber} - ${clientName}`);
   pdf.setSubject(`Cliente: ${clientName} · Riferimento preventivo: ${quoteNumber}`);
+  pdf.setAuthor('CorradoWEB 2026');
+  pdf.setCreator('CorradoWEB 2026');
   for (const moduleBytes of modulePdfs) {
     const modulePdf = await library.PDFDocument.load(new Uint8Array(moduleBytes));
     const pages = await pdf.copyPages(modulePdf, modulePdf.getPageIndices());

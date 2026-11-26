@@ -1,4 +1,4 @@
-MODULI D’ORDINE AREA TENDA — MAC
+MODULI D’ORDINE — CorradoWEB 2026 — MAC
 1. Estrai tutto lo ZIP. Apri Apri_catalogo.html in Safari o Chrome e scegli la scheda. Puoi anche aprire direttamente ciascun HTML nella cartella Moduli. Funziona offline.
 2. Scrivi nelle aree azzurre e clicca sulle caselle o sulle posizioni indicate nel disegno. Un secondo clic annulla la scelta. “Dimensione 100%” agevola la compilazione dei dettagli.
 3. Inserisci tutte le misure in centimetri, anche sui modelli Aliante. Ad esempio, per 3,50 metri scrivi 350. Puoi usare la virgola per i decimali. Le quote ripetute della stessa dimensione si aggiornano insieme. Compila ciascuna campata e la quota totale secondo il disegno.

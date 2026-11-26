@@ -19,7 +19,7 @@ Aggiornare il gestionale preventivi dalla base `v1.0.5`, migliorando la preparaz
 - Chiedere conferma manuale dopo che l’operatore ha completato l’invio; salvare timestamp indipendenti per PDF cliente e fornitore. L’apertura di WhatsApp e la generazione/allegato del PDF non equivalgono a invio.
 - Accettare cellulare vuoto; normalizzare i numeri italiani con `+39`, accettare numeri internazionali in formato coerente e mostrare errori formali in anagrafica. La validità formale non dichiara l’esistenza dell’account WhatsApp.
 - Duplicare dal preventivo aperto con nuovo ID e numero, mantenere i dati commerciali e i moduli, azzerare i metadati di invio e lasciare indipendenti originale e copia.
-- Sostituire i riferimenti di autore/brand visibili con `CorradoWEB 2026`; mantenere i nomi tecnici e i percorsi legacy necessari a leggere installazioni e archivi esistenti.
+- Sostituire i riferimenti di autore/brand visibili con `CorradoWEB 2026` e impostare autore/creatore PDF con lo stesso valore; mantenere i nomi tecnici e i percorsi legacy necessari a leggere installazioni e archivi esistenti.
 - Conservare nel PDF fornitore il nome cliente e tutti i dati dei moduli che già apparivano in 1.0.5, escludendo prezzi, totali, riepilogo e contatti/anagrafica ulteriori.
 - Conservare e verificare i dati al primo avvio aggiornato; fare una copia di sicurezza dell’archivio prima di scriverne una migrazione e non sovrascrivere dati non validi.
 
@@ -29,7 +29,7 @@ Aggiornare il gestionale preventivi dalla base `v1.0.5`, migliorando la preparaz
 - Inviare messaggi o documenti automaticamente, accedere alle API WhatsApp, o presumere che un numero sia registrato su WhatsApp.
 - Automatizzare l’incolla dell’allegato con CF_HDROP: gli appunti sono globali e l’app non può attestare in modo affidabile che WhatsApp Desktop e la conversazione corretta abbiano il focus. Questa strada contrasta con il requisito di non interferire con altre app e resta non verificabile senza un Windows reale. L’operatore allegherà manualmente il PDF salvato.
 - Implementare gli approfondimenti elencati al §8 della richiesta. La loro fattibilità viene riportata a parte.
-- Pubblicare una release prima del collaudo reale Windows e dell’approvazione dell’utente.
+- Pubblicare una release prima del collaudo reale Windows e dell’approvazione dell’utente. Il push del branch di lavoro è autorizzato dall’utente per coordinare i controlli via GitHub Issues.
 
 ## Approcci
 
@@ -60,4 +60,4 @@ Aggiornare il gestionale preventivi dalla base `v1.0.5`, migliorando la preparaz
 
 - Eseguire i test Python e JavaScript già presenti e aggiungere test mirati per validazione, duplicazione, timestamp, migrazione/backup, URI, branding e separazione PDF. Verificare che il PDF fornitore mantenga nome cliente e campi modulo senza importi.
 - L’host di sviluppo è macOS: può eseguire test unitari, controllare il sorgente e verificare il build script. Non può dimostrare l’apertura di WhatsApp Desktop, il focus della conversazione, l’installazione sopra 1.0.5 o l’installer su Windows reale.
-- Non allegare né inviare documenti reali nei test. Non pubblicare tag/release o fare push del branch.
+- Non allegare né inviare documenti reali nei test. Non pubblicare tag/release. Il push del branch di lavoro serve per la verifica Windows e il coordinamento sull’issue GitHub.
