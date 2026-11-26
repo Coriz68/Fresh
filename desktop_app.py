@@ -5,17 +5,16 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
-import webbrowser
 from datetime import date
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
 
 from local_store import LocalStore
 
@@ -23,6 +22,32 @@ from local_store import LocalStore
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 APP_TITLE = "Gestionale preventivi"
 APP_LOGGER = logging.getLogger("area_tenda_preventivi")
+
+
+def normalize_whatsapp_phone(phone: str) -> str:
+    value = str(phone or "").strip()
+    italian_prefix_with_trunk = bool(re.match(r"^(?:\+|00)39\s*\(0\)", value))
+    value = re.sub(r"\(\s*0\s*\)", "0" if italian_prefix_with_trunk else "", value)
+    value = re.sub(r"[\s().-]", "", value)
+    if value.startswith("00"):
+        value = f"+{value[2:]}"
+    elif not value.startswith("+"):
+        value = f"+39{value}"
+    if not re.fullmatch(r"\+[1-9]\d{7,14}", value):
+        raise ValueError("Inserisci un numero WhatsApp formalmente valido (8–15 cifre).")
+    return value[1:]
+
+
+def launch_whatsapp_uri(uri: str, *, platform_name: str | None = None) -> None:
+    if (platform_name or os.name) != "nt":
+        raise RuntimeError("L’apertura di WhatsApp Desktop è disponibile solo su Windows.")
+    startfile = getattr(os, "startfile", None)
+    if not callable(startfile):
+        raise RuntimeError("Windows non ha un gestore registrato per WhatsApp Desktop.")
+    try:
+        startfile(uri)
+    except OSError as error:
+        raise RuntimeError("Non riesco ad aprire WhatsApp Desktop. Verifica che sia installato.") from error
 
 
 def configure_app_logging(log_dir: Path | None = None) -> tuple[logging.Logger, Path]:
@@ -211,14 +236,10 @@ class DesktopApi:
         APP_LOGGER.info("frontend event: %s", event)
         return {"ok": True}
 
-    def open_whatsapp(self, message: str) -> dict[str, bool]:
-        if not isinstance(message, str) or not message.strip():
-            raise ValueError("Il messaggio WhatsApp non può essere vuoto.")
-        target = f"https://wa.me/?{urlencode({'text': message})}"
-        if not webbrowser.open(target, new=2):
-            APP_LOGGER.error("default browser refused WhatsApp link")
-            raise RuntimeError("Non riesco ad aprire WhatsApp nel browser predefinito.")
-        APP_LOGGER.info("WhatsApp click-to-chat link opened")
+    def open_whatsapp(self, phone: str) -> dict[str, bool]:
+        digits = normalize_whatsapp_phone(phone)
+        launch_whatsapp_uri(f"whatsapp://send?phone={digits}")
+        APP_LOGGER.info("WhatsApp Desktop protocol opened")
         return {"ok": True}
 
     def load_initial_data(self) -> dict[str, Any]:

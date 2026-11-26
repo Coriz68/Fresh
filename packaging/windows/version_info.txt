@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 5, 0),
-    prodvers=(1, 0, 5, 0),
+    filevers=(1, 0, 6, 0),
+    prodvers=(1, 0, 6, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x4,
@@ -13,13 +13,13 @@ VSVersionInfo(
     StringFileInfo([
       StringTable(
         '041004B0',
-        [StringStruct('CompanyName', 'Area Tenda'),
+        [StringStruct('CompanyName', 'CorradoWEB 2026'),
          StringStruct('FileDescription', 'Gestionale preventivi'),
-         StringStruct('FileVersion', '1.0.5'),
+         StringStruct('FileVersion', '1.0.6'),
          StringStruct('InternalName', 'GestionalePreventivi'),
          StringStruct('OriginalFilename', 'GestionalePreventivi.exe'),
          StringStruct('ProductName', 'Gestionale Preventivi'),
-         StringStruct('ProductVersion', '1.0.5')]
+         StringStruct('ProductVersion', '1.0.6')]
       )
     ]),
     VarFileInfo([VarStruct('Translation', [0x0410, 1200])])

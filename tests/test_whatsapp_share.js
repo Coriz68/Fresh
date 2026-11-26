@@ -6,43 +6,51 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(new URL('../gestionale.js', `file://${__dirname}/`), 'utf8');
-const messageSource = source.match(/function buildWhatsAppMessage\([^)]*\) \{[\s\S]*?\n\}/)?.[0];
-const shareSource = source.match(/async function shareQuotePdfViaWhatsApp\([^)]*\) \{[\s\S]*?\n\}/)?.[0];
-const quotePdfSource = source.match(/async function generateQuotePdf\([^)]*\) \{[\s\S]*?\n\}/)?.[0];
+const extractFunction = name => source.match(new RegExp(`(?:async )?function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`))?.[0];
+const phoneSource = extractFunction('normalizePhoneNumber');
+const shareSource = extractFunction('shareQuotePdfViaWhatsApp');
+const quotePdfSource = extractFunction('generateQuotePdf');
 
-function makeSandbox(pdfResult) {
+function makeSandbox(pdfResult, recipient = '+39 333 123 4567', phoneOptions = {}) {
   const calls = [];
-  const quote = { number: 'PREV-42' };
-  const client = { name: 'Cliente Demo' };
+  const quote = { number: 'PREV-42', clientId: 'client-1', sentCustomerAt: null, sentSupplierAt: null };
+  const client = { name: 'Cliente Demo', phone: phoneOptions.snapshotPhone || '+390000000000' };
+  const currentClient = { name: 'Cliente Demo', phone: phoneOptions.currentPhone ?? '+393331234567' };
+  const promptDefaults = [];
   const sandbox = {
     getQuote: () => quote,
     activeClient: () => client,
+    getClient: () => currentClient,
+    normalizePhoneNumber: undefined,
+    window: { prompt: (_message, defaultValue) => { promptDefaults.push(defaultValue); return recipient; } },
     generateQuotePdf: async kind => {
       calls.push(`generate:${kind}`);
       return pdfResult;
     },
     desktopBridge: {
-      open_whatsapp: async message => calls.push(`open:${message}`)
+      open_whatsapp: async (...args) => calls.push(`open:${JSON.stringify(args)}`)
     },
     showToast: message => calls.push(`toast:${message}`),
     calls
   };
-  vm.runInNewContext(`${messageSource};\n${shareSource};\nthis.share = shareQuotePdfViaWhatsApp;`, sandbox);
-  return { sandbox, calls };
+  vm.runInNewContext(`${phoneSource};\n${shareSource};\nthis.share = shareQuotePdfViaWhatsApp;`, sandbox);
+  return { sandbox, calls, quote, promptDefaults };
 }
 
-test('condivide il PDF salvato solo dopo averlo generato e include riferimenti distinti', async () => {
+test('genera e salva il PDF corretto prima di aprire WhatsApp senza testo', async () => {
   const { sandbox, calls } = makeSandbox({ path: '/pdf/preventivo_PREV-42_cliente.pdf' });
 
   await sandbox.share('customer');
 
   assert.equal(calls[0], 'generate:customer');
-  assert.match(calls[1], /open:.*PREV-42.*Cliente Demo.*preventivo_PREV-42_cliente\.pdf/);
+  assert.equal(calls[1], 'open:["+393331234567"]');
+  assert.match(calls[2], /PDF cliente salvato/);
 
   calls.length = 0;
   await sandbox.share('supplier');
   assert.equal(calls[0], 'generate:supplier');
-  assert.match(calls[1], /open:.*soli moduli.*PREV-42.*Cliente Demo/);
+  assert.equal(calls[1], 'open:["+393331234567"]');
+  assert.match(calls[2], /PDF fornitore salvato/);
 });
 
 test('se il PDF non viene salvato WhatsApp non viene aperto', async () => {
@@ -53,11 +61,35 @@ test('se il PDF non viene salvato WhatsApp non viene aperto', async () => {
   assert.deepEqual(calls, ['generate:supplier']);
 });
 
-test('la pagina preventivo offre due pulsanti desktop e salva il PDF prima del link', () => {
+test('annullare la scelta del destinatario non genera PDF e non apre WhatsApp', async () => {
+  const { sandbox, calls } = makeSandbox({ path: '/pdf/quote.pdf' }, null);
+
+  await sandbox.share('supplier');
+
+  assert.deepEqual(calls, []);
+});
+
+test('il destinatario cliente suggerito usa il numero attuale in anagrafica e non la fotografia del preventivo', async () => {
+  const { sandbox, promptDefaults } = makeSandbox(
+    { path: '/pdf/quote.pdf' },
+    '+39 333 765 4321',
+    { snapshotPhone: '+390000000000', currentPhone: '+393337654321' }
+  );
+
+  await sandbox.share('customer');
+
+  assert.equal(promptDefaults[0], '+393337654321');
+});
+
+test('la pagina preventivo mostra due pulsanti e registra separatamente l’invio manuale', () => {
   assert.match(source, /data-action="share-pdf-whatsapp" data-kind="customer"/);
   assert.match(source, /data-action="share-pdf-whatsapp" data-kind="supplier"/);
-  assert.match(source, /Scegli il contatto, allega il PDF salvato e conferma l’invio/);
+  assert.match(source, /data-action="mark-quote-sent" data-kind="customer"/);
+  assert.match(source, /data-action="mark-quote-sent" data-kind="supplier"/);
+  assert.match(source, /Allegalo manualmente nella chat/);
+  assert.doesNotMatch(source, /buildWhatsAppMessage|wa\.me|https:\/\/api\.whatsapp/);
   assert.match(source, /action === 'share-pdf-whatsapp'/);
+  assert.match(source, /action === 'mark-quote-sent'/);
 
   const writePosition = quotePdfSource.indexOf('await desktopBridge.write_pdf');
   const savedPosition = quotePdfSource.indexOf('savedPdfPath = saved.path');

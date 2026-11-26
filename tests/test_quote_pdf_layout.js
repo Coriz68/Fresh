@@ -9,6 +9,7 @@ const pdfSource = fs.readFileSync(new URL('../gestionale-pdf.js', `file://${__di
 
 function makePdfHarness() {
   const pages = [];
+  const metadata = {};
   let textMeasureCalls = 0;
   const logoSize = { width: 2048, height: 2048 };
   const regular = {
@@ -19,8 +20,10 @@ function makePdfHarness() {
     }
   };
   const pdf = {
-    setTitle() {},
-    setAuthor() {},
+    setTitle(value) { metadata.title = value; },
+    setSubject(value) { metadata.subject = value; },
+    setAuthor(value) { metadata.author = value; },
+    setCreator(value) { metadata.creator = value; },
     embedFont: async () => regular,
     embedPng: async () => logoSize,
     embedJpg: async () => logoSize,
@@ -37,6 +40,7 @@ function makePdfHarness() {
     },
     copyPages: async () => [],
     getPageIndices: () => [],
+    getPageCount: () => 1,
     save: async () => new Uint8Array([37, 80, 68, 70])
   };
   const window = {
@@ -57,7 +61,7 @@ function makePdfHarness() {
     String
   };
   vm.runInNewContext(pdfSource, sandbox);
-  return { window, pages, getTextMeasureCalls: () => textMeasureCalls };
+  return { window, pages, metadata, getTextMeasureCalls: () => textMeasureCalls };
 }
 
 const payload = {
@@ -75,9 +79,11 @@ const payload = {
 };
 
 test('PDF cliente: il logo Fresh è più grande e il riepilogo usa una gerarchia grafica professionale', async () => {
-  const { window, pages } = makePdfHarness();
+  const { window, pages, metadata } = makePdfHarness();
   await window.buildQuotePdfDocument(payload, []);
 
+  assert.equal(metadata.author, 'CorradoWEB 2026');
+  assert.equal(metadata.creator, 'CorradoWEB 2026');
   const [page] = pages;
   const [logo] = page.drawImageCalls;
   assert.ok(logo.height >= 100, `Il logo deve avere un’altezza di almeno 100 pt (attuale: ${logo.height}).`);
@@ -135,4 +141,17 @@ test('PDF cliente: una nota di un milione di caratteri viene accorciata rapidame
 
   assert.ok(harness.getTextMeasureCalls() < 100, `Le misurazioni devono restare sotto 100, attuali: ${harness.getTextMeasureCalls()}.`);
   assert.ok(harness.pages[0].drawTextCalls.some(call => call.text.startsWith('NOTE: X') && call.text.endsWith('...')));
+});
+
+test('PDF fornitore: conserva cliente e riferimento senza metadati commerciali', async () => {
+  const harness = makePdfHarness();
+
+  await harness.window.buildSupplierPdfDocument([], 'PREV-2026-0042', 'Cliente Riservato');
+
+  assert.equal(harness.metadata.author, 'CorradoWEB 2026');
+  assert.equal(harness.metadata.creator, 'CorradoWEB 2026');
+  assert.match(harness.metadata.title, /Cliente Riservato/);
+  assert.match(harness.metadata.subject, /Cliente Riservato/);
+  assert.match(harness.metadata.subject, /PREV-2026-0042/);
+  assert.doesNotMatch(harness.metadata.title + harness.metadata.subject, /\b(?:totale|prezzo|€)\b/i);
 });
