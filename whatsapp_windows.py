@@ -265,6 +265,9 @@ def attach_pdf_to_open_chat(
             timeout_seconds,
             "verifica dell’anteprima del PDF in WhatsApp",
         )
+        # The pywebview call can reactivate its own window as it returns to JavaScript.
+        # Bring the verified WhatsApp preview back to the foreground as the final UI action.
+        whatsapp_window.set_focus()
     except RuntimeError as error:
         if "allegato annullato" in str(error).casefold() or "timeout" in str(error).casefold():
             raise

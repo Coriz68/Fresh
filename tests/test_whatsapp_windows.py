@@ -42,6 +42,7 @@ class FakeWindow:
         self.process_name = process_name
         self.controls = controls or []
         self.visible = visible
+        self.focus_count = 0
 
     def window_text(self):
         return self.title
@@ -57,7 +58,7 @@ class FakeWindow:
         ]
 
     def set_focus(self):
-        return None
+        self.focus_count += 1
 
 
 class FakeDesktop:
@@ -150,6 +151,7 @@ class WhatsAppWindowsTests(unittest.TestCase):
         self.assertEqual(self.dialog.controls[0].value, str(self.pdf_path.resolve()))
         self.assertEqual(self.dialog.controls[1].clicked, 1)
         self.assertTrue(any(control.name == self.pdf_path.name for control in self.desktop._windows[0].controls))
+        self.assertEqual(self.desktop._windows[0].focus_count, 2, "WhatsApp deve tornare in primo piano dopo la preparazione.")
         self.assertEqual(self.send_button.clicked, 0)
 
     def test_accepts_system_hosted_file_picker_only_when_owned_by_whatsapp(self):
