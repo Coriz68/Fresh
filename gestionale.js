@@ -891,6 +891,8 @@ async function shareQuotePdfViaWhatsApp(kind) {
   if (!['customer', 'supplier'].includes(kind)) return;
   const quote = getQuote();
   if (!quote) return;
+  let generated = null;
+  let whatsappOpened = false;
   try {
     const currentClient = kind === 'customer' && quote.clientId ? getClient(quote.clientId) : null;
     const suggestedPhone = kind === 'customer' ? (currentClient?.phone || '') : '';
@@ -904,13 +906,24 @@ async function shareQuotePdfViaWhatsApp(kind) {
       showToast('Inserisci un numero WhatsApp valido per aprire la conversazione.', true);
       return;
     }
-    const generated = await generateQuotePdf(kind);
+    generated = await generateQuotePdf(kind);
     if (!generated?.path) return;
     const filename = generated.path.split(/[\\/]/).pop();
     await desktopBridge.open_whatsapp(normalizedPhone.value);
-    showToast(`PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} salvato: ${filename}. Allegalo manualmente nella chat e torna qui per confermare l’invio.`);
+    whatsappOpened = true;
+    const confirmed = window.confirm(
+      `WhatsApp Desktop è stato aperto per ${normalizedPhone.value}. Verifica che nella finestra WhatsApp sia visibile la chat corretta (se serve usa Alt+Tab), poi conferma per allegare ${filename}. Il PDF sarà preparato come allegato, ma non verrà inviato.`
+    );
+    if (!confirmed) {
+      showToast(`PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} salvato: ${filename}. Allegato non preparato; puoi allegarlo manualmente nella chat.`);
+      return;
+    }
+    await desktopBridge.attach_whatsapp_pdf(kind, generated.path, true);
+    showToast(`PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} allegato in WhatsApp: ${filename}. Controlla l’anteprima e premi Invia manualmente.`);
   } catch (error) {
-    showToast(`WhatsApp non aperto: ${error.message}`, true);
+    const filename = generated?.path ? generated.path.split(/[\\/]/).pop() : '';
+    const fallback = filename ? ` PDF salvato: ${filename}. Allegalo manualmente nella chat.` : '';
+    showToast(`${whatsappOpened ? 'PDF non allegato' : 'WhatsApp non aperto'}: ${error.message}.${fallback}`, true);
   }
 }
 

@@ -136,6 +136,48 @@ class DesktopApiTests(unittest.TestCase):
 
         launch_uri.assert_called_once_with("whatsapp://send?phone=390212345678")
 
+    def test_attach_whatsapp_pdf_requires_explicit_recipient_confirmation(self):
+        with self.assertRaisesRegex(ValueError, "[Cc]onferma"):
+            self.api.attach_whatsapp_pdf("customer", "/tmp/preventivo.pdf", False)
+
+    def test_attach_whatsapp_pdf_rejects_paths_outside_the_configured_customer_folder(self):
+        customer_dir = self.root / "pdf cliente"
+        customer_dir.mkdir()
+        self.store.set_output_folder("customer", customer_dir)
+        elsewhere = self.root / "preventivo.pdf"
+        elsewhere.write_bytes(b"%PDF-1.7 sample")
+
+        with self.assertRaisesRegex(ValueError, "cartella"):
+            self.api.attach_whatsapp_pdf("customer", str(elsewhere), True)
+
+    def test_attach_whatsapp_pdf_rejects_wrong_extension_and_non_pdf_content(self):
+        customer_dir = self.root / "pdf cliente"
+        customer_dir.mkdir()
+        self.store.set_output_folder("customer", customer_dir)
+        wrong_extension = customer_dir / "preventivo.txt"
+        wrong_extension.write_bytes(b"%PDF-1.7 sample")
+        invalid_pdf = customer_dir / "preventivo.pdf"
+        invalid_pdf.write_bytes(b"not a pdf")
+
+        with self.assertRaisesRegex(ValueError, "PDF"):
+            self.api.attach_whatsapp_pdf("customer", str(wrong_extension), True)
+        with self.assertRaisesRegex(ValueError, "PDF"):
+            self.api.attach_whatsapp_pdf("customer", str(invalid_pdf), True)
+
+    def test_attach_whatsapp_pdf_delegates_only_a_valid_configured_pdf_to_driver(self):
+        customer_dir = self.root / "pdf cliente"
+        customer_dir.mkdir()
+        self.store.set_output_folder("customer", customer_dir)
+        pdf_path = customer_dir / "preventivo_cliente.pdf"
+        pdf_path.write_bytes(b"%PDF-1.7 sample")
+        attached = []
+        api = DesktopApi(self.store, whatsapp_attacher=attached.append)
+
+        result = api.attach_whatsapp_pdf("customer", str(pdf_path), True)
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(attached, [pdf_path.resolve()])
+
     def test_open_whatsapp_reports_non_windows_or_missing_protocol_handler(self):
         with self.assertRaisesRegex(RuntimeError, "Windows"):
             launch_whatsapp_uri("whatsapp://send?phone=393331234567", platform_name="darwin")

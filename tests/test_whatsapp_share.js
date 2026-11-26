@@ -22,13 +22,20 @@ function makeSandbox(pdfResult, recipient = '+39 333 123 4567', phoneOptions = {
     activeClient: () => client,
     getClient: () => currentClient,
     normalizePhoneNumber: undefined,
-    window: { prompt: (_message, defaultValue) => { promptDefaults.push(defaultValue); return recipient; } },
+    window: {
+      prompt: (_message, defaultValue) => { promptDefaults.push(defaultValue); return recipient; },
+      confirm: message => {
+        calls.push(`confirm:${message}`);
+        return phoneOptions.confirmResult ?? true;
+      }
+    },
     generateQuotePdf: async kind => {
       calls.push(`generate:${kind}`);
       return pdfResult;
     },
     desktopBridge: {
-      open_whatsapp: async (...args) => calls.push(`open:${JSON.stringify(args)}`)
+      open_whatsapp: async (...args) => calls.push(`open:${JSON.stringify(args)}`),
+      attach_whatsapp_pdf: async (...args) => calls.push(`attach:${JSON.stringify(args)}`)
     },
     showToast: message => calls.push(`toast:${message}`),
     calls
@@ -37,20 +44,24 @@ function makeSandbox(pdfResult, recipient = '+39 333 123 4567', phoneOptions = {
   return { sandbox, calls, quote, promptDefaults };
 }
 
-test('genera e salva il PDF corretto prima di aprire WhatsApp senza testo', async () => {
+test('genera il PDF corretto, apre la chat, chiede conferma e allega il file senza inviarlo', async () => {
   const { sandbox, calls } = makeSandbox({ path: '/pdf/preventivo_PREV-42_cliente.pdf' });
 
   await sandbox.share('customer');
 
   assert.equal(calls[0], 'generate:customer');
   assert.equal(calls[1], 'open:["+393331234567"]');
-  assert.match(calls[2], /PDF cliente salvato/);
+  assert.match(calls[2], /confirm:.*393331234567.*preventivo_PREV-42_cliente\.pdf/);
+  assert.equal(calls[3], 'attach:["customer","/pdf/preventivo_PREV-42_cliente.pdf",true]');
+  assert.match(calls[4], /PDF cliente allegato/);
 
   calls.length = 0;
   await sandbox.share('supplier');
   assert.equal(calls[0], 'generate:supplier');
   assert.equal(calls[1], 'open:["+393331234567"]');
-  assert.match(calls[2], /PDF fornitore salvato/);
+  assert.match(calls[2], /confirm:.*preventivo_PREV-42_cliente\.pdf/);
+  assert.equal(calls[3], 'attach:["supplier","/pdf/preventivo_PREV-42_cliente.pdf",true]');
+  assert.match(calls[4], /PDF fornitore allegato/);
 });
 
 test('se il PDF non viene salvato WhatsApp non viene aperto', async () => {
@@ -59,6 +70,34 @@ test('se il PDF non viene salvato WhatsApp non viene aperto', async () => {
   await sandbox.share('supplier');
 
   assert.deepEqual(calls, ['generate:supplier']);
+});
+
+test('annullare la conferma della chat lascia il PDF salvato e non prova ad allegarlo', async () => {
+  const { sandbox, calls } = makeSandbox(
+    { path: '/pdf/preventivo_PREV-42_fornitore.pdf' },
+    '+39 333 123 4567',
+    { confirmResult: false }
+  );
+
+  await sandbox.share('supplier');
+
+  assert.equal(calls[0], 'generate:supplier');
+  assert.equal(calls[1], 'open:["+393331234567"]');
+  assert.match(calls[2], /confirm:/);
+  assert.equal(calls.some(call => call.startsWith('attach:')), false);
+  assert.match(calls[3], /[Aa]llegato non preparato/);
+});
+
+test('un errore durante l’allegato non dichiara il PDF inviato né nasconde il percorso', async () => {
+  const { sandbox, calls, quote } = makeSandbox({ path: '/pdf/preventivo_PREV-42_cliente.pdf' });
+  sandbox.desktopBridge.attach_whatsapp_pdf = async () => { throw new Error('Controllo UI non disponibile'); };
+
+  await sandbox.share('customer');
+
+  assert.equal(quote.sentCustomerAt, null);
+  assert.equal(quote.sentSupplierAt, null);
+  assert.match(calls.at(-1), /Allegalo manualmente nella chat/);
+  assert.match(calls.at(-1), /preventivo_PREV-42_cliente\.pdf/);
 });
 
 test('annullare la scelta del destinatario non genera PDF e non apre WhatsApp', async () => {

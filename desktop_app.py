@@ -50,6 +50,13 @@ def launch_whatsapp_uri(uri: str, *, platform_name: str | None = None) -> None:
         raise RuntimeError("Non riesco ad aprire WhatsApp Desktop. Verifica che sia installato.") from error
 
 
+def _attach_pdf_in_whatsapp(path: Path) -> None:
+    # Keep Windows-only UI Automation out of startup and non-Windows imports.
+    from whatsapp_windows import attach_pdf_to_open_chat
+
+    attach_pdf_to_open_chat(path)
+
+
 def configure_app_logging(log_dir: Path | None = None) -> tuple[logging.Logger, Path]:
     global APP_LOGGER
     directory = log_dir or (LocalStore.default_settings_dir() / "logs")
@@ -203,6 +210,7 @@ class DesktopApi:
         "import_backup",
         "request_close",
         "open_whatsapp",
+        "attach_whatsapp_pdf",
         "log_event",
     })
     _ALLOWED_FRONTEND_EVENTS = frozenset({
@@ -211,10 +219,16 @@ class DesktopApi:
         "pdf_supplier_merge", "pdf_disk_save_started", "pdf_generation_failed",
     })
 
-    def __init__(self, store: LocalStore | None = None, window: Any = None):
+    def __init__(
+        self,
+        store: LocalStore | None = None,
+        window: Any = None,
+        whatsapp_attacher: Any = None,
+    ):
         self._store = store if store is not None else LocalStore()
         self._window = window
         self._close_coordinator: CloseCoordinator | None = None
+        self._whatsapp_attacher = whatsapp_attacher or _attach_pdf_in_whatsapp
 
     def __dir__(self) -> list[str]:
         return sorted(self.EXPOSED_METHODS)
@@ -240,6 +254,42 @@ class DesktopApi:
         digits = normalize_whatsapp_phone(phone)
         launch_whatsapp_uri(f"whatsapp://send?phone={digits}")
         APP_LOGGER.info("WhatsApp Desktop protocol opened")
+        return {"ok": True}
+
+    def attach_whatsapp_pdf(
+        self,
+        kind: str,
+        path: str,
+        recipient_confirmed: bool,
+    ) -> dict[str, bool]:
+        if not recipient_confirmed:
+            raise ValueError("Conferma prima che la chat WhatsApp mostri il destinatario corretto.")
+        path_key = {"customer": "customer_pdf_dir", "supplier": "supplier_pdf_dir"}.get(kind)
+        if path_key is None:
+            raise ValueError("Tipo di PDF non riconosciuto.")
+        configured_folder = self._store.settings.get(path_key)
+        if not configured_folder:
+            raise ValueError("Scegli prima la cartella di destinazione PDF.")
+        folder = Path(configured_folder).expanduser().resolve()
+        try:
+            pdf_path = Path(path).expanduser().resolve(strict=True)
+        except (OSError, TypeError, ValueError) as error:
+            raise FileNotFoundError("Il PDF da allegare non esiste o non è accessibile.") from error
+        if not pdf_path.is_file() or pdf_path.suffix.lower() != ".pdf":
+            raise ValueError("Il file da allegare non è un PDF valido.")
+        try:
+            pdf_path.relative_to(folder)
+        except ValueError as error:
+            raise ValueError("Il PDF deve trovarsi nella cartella configurata per questo tipo di documento.") from error
+        try:
+            with pdf_path.open("rb") as stream:
+                is_pdf = stream.read(5) == b"%PDF-"
+        except OSError as error:
+            raise FileNotFoundError("Il PDF da allegare non è accessibile.") from error
+        if not is_pdf:
+            raise ValueError("Il file da allegare non è un PDF valido.")
+        self._whatsapp_attacher(pdf_path)
+        APP_LOGGER.info("WhatsApp PDF attachment prepared (%s)", kind)
         return {"ok": True}
 
     def load_initial_data(self) -> dict[str, Any]:
