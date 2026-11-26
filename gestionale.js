@@ -68,6 +68,14 @@ function dateLabel(value) {
   return Number.isNaN(date.valueOf()) ? '—' : new Intl.DateTimeFormat('it-IT').format(date);
 }
 
+function dateTimeLabel(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf())
+    ? '—'
+    : new Intl.DateTimeFormat('it-IT', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+}
+
 function localDateString(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -277,6 +285,14 @@ function activeClient(quote) {
   return quote.clientSnapshot || snapshotClient(getClient(quote.clientId));
 }
 
+function quoteModuleData(kind, originalData, client, quote) {
+  return {
+    ...structuredClone(originalData || {}),
+    cliente: kind === 'customer' ? (client.name || client.company || '') : '',
+    riferimento: quote.number
+  };
+}
+
 function quoteTotals(quote) {
   const lines = quote.items.map(item => {
     const quantity = Math.max(0, Number(item.quantity) || 0);
@@ -296,6 +312,16 @@ function quoteTotals(quote) {
 
 function quoteStatusClass(status) {
   return ({ inviato: 'sent', accettato: 'accepted', archiviato: 'closed' })[status] || '';
+}
+
+function quoteSendStatusMarkup(quote) {
+  const customer = quote.sentCustomerAt
+    ? `Inviato il ${esc(dateTimeLabel(quote.sentCustomerAt))}`
+    : 'Non inviato';
+  const supplier = quote.sentSupplierAt
+    ? `Inviato il ${esc(dateTimeLabel(quote.sentSupplierAt))}`
+    : 'Non inviato';
+  return `<div class="send-indicators"><span><b>PDF cliente</b> · ${customer}</span><span><b>PDF fornitore</b> · ${supplier}</span></div>`;
 }
 
 function setPage(page) {
@@ -364,10 +390,10 @@ function renderDashboard() {
 
 function renderQuoteTable(quotes) {
   if (!quotes.length) return '<div class="empty"><strong>Nessun preventivo</strong>Crea il primo preventivo per iniziare.</div>';
-  return `<div class="table-wrap"><table><thead><tr><th>NUMERO</th><th>CLIENTE</th><th>AGGIORNATO</th><th>STATO</th><th class="right">TOTALE SCONTATO</th><th></th></tr></thead><tbody>${quotes.map(quote => {
+  return `<div class="table-wrap"><table><thead><tr><th>NUMERO</th><th>CLIENTE</th><th>AGGIORNATO</th><th>STATO</th><th>INVII PDF</th><th class="right">TOTALE SCONTATO</th><th></th></tr></thead><tbody>${quotes.map(quote => {
     const client = activeClient(quote);
     const totals = quoteTotals(quote);
-    return `<tr><td><b>${esc(quote.number)}</b></td><td>${esc(clientLabel(client))}</td><td>${dateLabel(quote.updatedAt)}</td><td><span class="status ${quoteStatusClass(quote.status)}">${esc(quote.status || 'bozza')}</span></td><td class="right">${money(totals.netTotal)}</td><td><div class="row-actions"><button class="button small" data-action="open-quote" data-id="${esc(quote.id)}">Apri</button><button class="button small danger" data-action="delete-quote" data-id="${esc(quote.id)}" aria-label="Elimina ${esc(quote.number)}">×</button></div></td></tr>`;
+    return `<tr><td><b>${esc(quote.number)}</b></td><td>${esc(clientLabel(client))}</td><td>${dateLabel(quote.updatedAt)}</td><td><span class="status ${quoteStatusClass(quote.status)}">${esc(quote.status || 'bozza')}</span></td><td>${quoteSendStatusMarkup(quote)}</td><td class="right">${money(totals.netTotal)}</td><td><div class="row-actions"><button class="button small" data-action="open-quote" data-id="${esc(quote.id)}">Apri</button><button class="button small danger" data-action="delete-quote" data-id="${esc(quote.id)}" aria-label="Elimina ${esc(quote.number)}">×</button></div></td></tr>`;
   }).join('')}</tbody></table></div>`;
 }
 
@@ -534,11 +560,14 @@ function renderQuote() {
       </div>
       <aside class="card quote-side">
         <div class="card-head"><div><h2>${esc(quote.number)}</h2><p>Creato il ${dateLabel(quote.createdAt)}</p></div><span class="status ${quoteStatusClass(quote.status)}">${esc(quote.status || 'bozza')}</span></div>
+        ${quoteSendStatusMarkup(quote)}
         <button class="button primary" data-action="generate-pdf" data-kind="customer">Genera PDF cliente completo</button>
         <button class="button" data-action="generate-pdf" data-kind="supplier">Genera PDF fornitore · soli moduli</button>
         ${desktopBridge ? `<button class="button" data-action="share-pdf-whatsapp" data-kind="customer" ${storagePaths.customer_pdf_dir ? '' : 'disabled'}>Invia PDF cliente con WhatsApp</button>
         <button class="button" data-action="share-pdf-whatsapp" data-kind="supplier" ${storagePaths.supplier_pdf_dir ? '' : 'disabled'}>Invia PDF fornitore con WhatsApp</button>
-        <div class="footer-note">WhatsApp si apre con il messaggio pronto. Scegli il contatto, allega il PDF salvato e conferma l’invio.</div>` : ''}
+        <div class="footer-note">WhatsApp Desktop apre la chat senza testo. Allega il PDF corretto e conferma l’invio nella chat; poi registra l’esito qui sotto.</div>` : ''}
+        <button class="button" data-action="mark-quote-sent" data-kind="customer">Conferma invio PDF cliente</button>
+        <button class="button" data-action="mark-quote-sent" data-kind="supplier">Conferma invio PDF fornitore</button>
         <button class="button" data-action="save-quote">Salva preventivo</button>
         <button class="button" data-action="back-quotes">Torna all’archivio</button>
         <div class="footer-note">Il PDF cliente include riepilogo e moduli. Quello fornitore contiene solo i moduli, con nome cliente e riferimento al preventivo.</div>
@@ -809,32 +838,52 @@ async function handleLogoUpload(file) {
   showToast('Logo salvato nelle impostazioni locali.');
 }
 
-function buildWhatsAppMessage(kind, quoteNumber, clientName, filename) {
-  if (kind === 'customer') {
-    return `Buongiorno, invio il preventivo completo ${quoteNumber} intestato a ${clientName}. Allego il PDF ${filename}.`;
-  }
-  return `Buongiorno, invio i soli moduli del preventivo ${quoteNumber} intestato a ${clientName}. Allego il PDF ${filename}.`;
-}
-
 async function shareQuotePdfViaWhatsApp(kind) {
   if (!desktopBridge?.open_whatsapp) {
     showToast('La condivisione WhatsApp è disponibile nella finestra desktop.', true);
     return;
   }
+  if (!['customer', 'supplier'].includes(kind)) return;
   const quote = getQuote();
   if (!quote) return;
   const client = activeClient(quote);
   try {
+    const suggestedPhone = kind === 'customer' ? (client?.phone || '') : '';
+    const recipient = window.prompt(
+      kind === 'customer' ? 'Numero WhatsApp del cliente. Verifica o modifica il destinatario:' : 'Numero WhatsApp del fornitore:',
+      suggestedPhone
+    );
+    if (recipient === null) return;
+    const normalizedPhone = normalizePhoneNumber(recipient);
+    if (normalizedPhone.empty || !normalizedPhone.valid) {
+      showToast('Inserisci un numero WhatsApp valido per aprire la conversazione.', true);
+      return;
+    }
     const generated = await generateQuotePdf(kind);
     if (!generated?.path) return;
     const filename = generated.path.split(/[\\/]/).pop();
-    const clientName = client?.name || client?.company || 'Cliente';
-    const message = buildWhatsAppMessage(kind, quote.number, clientName, filename);
-    await desktopBridge.open_whatsapp(message);
-    showToast(`PDF salvato: ${generated.path}. In WhatsApp allega ${filename} e conferma l’invio.`);
+    await desktopBridge.open_whatsapp(normalizedPhone.value);
+    showToast(`PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} salvato: ${filename}. Allegalo manualmente nella chat e torna qui per confermare l’invio.`);
   } catch (error) {
     showToast(`WhatsApp non aperto: ${error.message}`, true);
   }
+}
+
+async function markQuoteSent(kind) {
+  const fields = { customer: ['sentCustomerAt', 'PDF cliente'], supplier: ['sentSupplierAt', 'PDF fornitore'] };
+  const entry = fields[kind];
+  const quote = getQuote();
+  if (!entry || !quote) return;
+  if (!window.confirm(`Confermi di avere effettivamente inviato il ${entry[1]}?`)) return;
+  const [field, label] = entry;
+  const previousValue = quote[field] || null;
+  quote[field] = new Date().toISOString();
+  if (!await persistNow()) {
+    quote[field] = previousValue;
+    return;
+  }
+  render();
+  showToast(`${label} registrato come inviato.`);
 }
 
 async function generateQuotePdf(kind = 'customer') {
@@ -885,11 +934,7 @@ async function generateQuotePdf(kind = 'customer') {
         const model = modules.find(entry => entry.id === item.moduleId);
         if (!model) throw new Error(`Modulo non trovato: ${item.moduleId}.`);
         const originalData = structuredClone(item.data || {});
-        const moduleData = {
-          ...originalData,
-          cliente: client.name || client.company || '',
-          riferimento: quote.number
-        };
+        const moduleData = quoteModuleData(kind, originalData, client, quote);
         await loadModuleFrame(model);
         await requestModule('set-data', { data: moduleData });
         try {
@@ -924,7 +969,7 @@ async function generateQuotePdf(kind = 'customer') {
         showPdfProgress('Unisco le pagine dei moduli…');
         const supplierBuilder = frame.contentWindow?.buildSupplierPdfDocument;
         if (typeof supplierBuilder !== 'function') throw new Error('Generatore PDF fornitore non disponibile.');
-        bytes = await supplierBuilder(modulePdfs, quote.number, client.name || client.company || '');
+        bytes = await supplierBuilder(modulePdfs, quote.number);
       }
       generatedPdfBytes = bytes;
       generatedPdfKind = kind;
@@ -1090,6 +1135,7 @@ function handleClick(event) {
     }
   } else if (action === 'generate-pdf') generateQuotePdf(button.dataset.kind || 'customer');
   else if (action === 'share-pdf-whatsapp') shareQuotePdfViaWhatsApp(button.dataset.kind || 'customer');
+  else if (action === 'mark-quote-sent') markQuoteSent(button.dataset.kind || 'customer');
   else if (action === 'save-quote') {
     const quote = getQuote();
     if (quote) {

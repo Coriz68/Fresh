@@ -51,7 +51,7 @@
 
 **Files:**
 - Modify: `gestionale.js`
-- Test: `tests/test_preventivi_v1_0_6.js`
+- Test: `tests/test_preventivi_v1_0_6.js`, `tests/test_whatsapp_share.js`
 
 **Interfaces:**
 - Produces: `normalizePhoneNumber(value) -> { value: string, valid: boolean, empty: boolean }`, using E.164-like formatting with 8–15 digits; national Italian numbers receive `+39`. Empty is allowed, but a nonempty invalid value blocks saving the client and shows an inline error.
@@ -81,7 +81,7 @@
 ### Task 4: Show independent send status and confirmation
 
 **Files:**
-- Modify: `gestionale.js`, `gestionale.css`
+- Modify: `gestionale.js`, `gestionale.css`, `gestionale-pdf.js`
 - Test: `tests/test_preventivi_v1_0_6.js`
 - Regression: `tests/test_quote_pdf_layout.js`
 
@@ -89,11 +89,11 @@
 - Consumes: Task 1 fields `sentCustomerAt` / `sentSupplierAt`; Task 3 `open_whatsapp(phone)`.
 - Produces: independent “Segna PDF cliente inviato” and “Segna PDF fornitore inviato” actions that record `new Date().toISOString()` only after a second explicit confirmation. WhatsApp handoff generates/saves only the selected PDF, passes only the selected normalized recipient, and tells the operator to attach the file and return to confirm.
 
-- [ ] **Step 1: Write failing tests** `customer and supplier send timestamps are independent`, `opening WhatsApp does not mark a quote sent`, `cancelled manual confirmation does not mark sent`, `confirmed send stores an ISO timestamp`, and `WhatsApp handoff supplies customer phone and no message`. Assert the untouched timestamp remains null.
-- [ ] **Step 2: Run** `node --test tests/test_preventivi_v1_0_6.js`. Expected: failures because state/actions are absent or message is still generated.
-- [ ] **Step 3: Implement** separate status badges in editor and quote list, separate manual confirmation actions, optional recipient entry for supplier/no client phone, and the text-free WhatsApp flow. Keep PDF kind passed to the existing generators unchanged.
-- [ ] **Step 4: Run** the new JS tests. Expected: all handoff and confirmation cases pass.
-- [ ] **Step 5: Run** `node --test tests/*.js`. Expected: all JavaScript tests pass and supplier PDF contains no customer totals/prices.
+- [x] **Step 1: Write failing tests** `customer and supplier send timestamps are independent`, `opening WhatsApp does not mark a quote sent`, `cancelled manual confirmation does not mark sent`, `confirmed send stores an ISO timestamp`, `quote list shows independent PDF send statuses`, `WhatsApp handoff supplies customer phone and no message`, `supplier module data excludes client identity while customer data retains it`, and `PDF supplier metadata omits client identity and prices`. Assert the untouched timestamp remains null.
+- [x] **Step 2: Run** `node --test tests/test_preventivi_v1_0_6.js`. Expected: failures because state/actions are absent or message is still generated.
+- [x] **Step 3: Implement** separate status badges in editor and quote list, separate manual confirmation actions, optional recipient entry for supplier/no client phone, and the text-free WhatsApp flow. Ensure supplier module data and PDF metadata contain no customer identity; keep the visual structure and pricing calculations unchanged.
+- [x] **Step 4: Run** the new JS tests. Expected: all handoff and confirmation cases pass.
+- [x] **Step 5: Run** `node --test tests/*.js`. Expected: all JavaScript tests pass and supplier PDF contains no customer totals/prices.
 
 ### Task 5: Duplicate an edited quote safely
 

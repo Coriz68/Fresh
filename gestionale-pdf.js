@@ -132,12 +132,12 @@ window.buildQuotePdfDocument = async function (payload, modulePdfs) {
   return pdf.save();
 };
 
-window.buildSupplierPdfDocument = async function (modulePdfs, quoteNumber, clientName) {
+window.buildSupplierPdfDocument = async function (modulePdfs, quoteNumber) {
   const library = window.PDFLib;
   if (!library?.PDFDocument) throw new Error('Libreria PDF non disponibile nel modulo originale.');
   const pdf = await library.PDFDocument.create();
-  pdf.setTitle(`Moduli ${quoteNumber} - ${clientName}`);
-  pdf.setSubject(`Cliente: ${clientName} · Riferimento preventivo: ${quoteNumber}`);
+  pdf.setTitle(`Moduli preventivo ${quoteNumber}`);
+  pdf.setSubject(`Riferimento preventivo: ${quoteNumber}`);
   for (const moduleBytes of modulePdfs) {
     const modulePdf = await library.PDFDocument.load(new Uint8Array(moduleBytes));
     const pages = await pdf.copyPages(modulePdf, modulePdf.getPageIndices());
