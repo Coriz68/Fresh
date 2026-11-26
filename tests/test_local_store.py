@@ -71,6 +71,34 @@ class LocalStoreTests(unittest.TestCase):
 
         self.assertEqual(database_file.read_bytes(), original_bytes)
 
+    def test_opening_an_existing_database_folder_migrates_only_after_backup(self):
+        database_file = self.database / "preventivi.json"
+        legacy = sample_state()
+        legacy["quotes"] = [{"id": "q1", "number": "PREV-2025-0001", "items": []}]
+        original_bytes = json.dumps(legacy, ensure_ascii=False, indent=2).encode("utf-8")
+        database_file.write_bytes(original_bytes)
+
+        result = self.store.set_database_folder(self.database, "open")
+
+        self.assertIsNone(result["state"]["quotes"][0]["sentCustomerAt"])
+        self.assertIsNone(result["state"]["quotes"][0]["sentSupplierAt"])
+        backup = self.database / "preventivi.pre-1.0.6.backup.json"
+        self.assertEqual(backup.read_bytes(), original_bytes)
+        self.assertEqual(json.loads(database_file.read_text(encoding="utf-8"))["quotes"], result["state"]["quotes"])
+
+    def test_malformed_quote_record_is_rejected_without_rewriting_or_backup(self):
+        database_file = self.database / "preventivi.json"
+        legacy = sample_state()
+        legacy["quotes"] = [None, {"id": "q1", "number": "PREV-2025-0001", "items": []}]
+        original_bytes = json.dumps(legacy, ensure_ascii=False, indent=2).encode("utf-8")
+        database_file.write_bytes(original_bytes)
+
+        with self.assertRaisesRegex(ValueError, "database"):
+            self.store.set_database_folder(self.database, "open")
+
+        self.assertEqual(database_file.read_bytes(), original_bytes)
+        self.assertEqual(list(self.database.glob("*.backup.json")), [])
+
     def test_selecting_empty_database_folder_can_copy_current_state(self):
         current = sample_state()
         result = self.store.set_database_folder(self.database, "copy-current", current)

@@ -72,11 +72,7 @@ class LocalStore:
         elif not database_path.is_file():
             raise FileNotFoundError(f"Database non trovato: {database_path}")
         else:
-            state = self._read_database(database_path)
-            state, migrated = self._migrate_quote_send_fields(state)
-            if migrated:
-                self._create_pre_migration_backup(database_path)
-                self._atomic_write_json(database_path, state)
+            state = self._load_database_with_migration(database_path)
         return {
             "state": state,
             "paths": self.paths,
@@ -103,7 +99,7 @@ class LocalStore:
         if database_path.exists():
             if mode != "open":
                 raise ValueError("Il database esiste già: aprilo per conservarne i dati.")
-            state = self._read_database(database_path)
+            state = self._load_database_with_migration(database_path)
         else:
             if mode == "copy-current":
                 if current_state is None:
@@ -236,17 +232,24 @@ class LocalStore:
             not isinstance(state, dict)
             or not isinstance(state.get("clients"), list)
             or not isinstance(state.get("quotes"), list)
+            or not all(isinstance(quote, dict) for quote in state.get("quotes", []))
             or not isinstance(state.get("prices"), dict)
             or not isinstance(state.get("company"), dict)
         ):
             raise ValueError("La struttura del database non è valida.")
 
+    def _load_database_with_migration(self, database_path: Path) -> dict[str, Any]:
+        state = self._read_database(database_path)
+        state, migrated = self._migrate_quote_send_fields(state)
+        if migrated:
+            self._create_pre_migration_backup(database_path)
+            self._atomic_write_json(database_path, state)
+        return state
+
     @staticmethod
     def _migrate_quote_send_fields(state: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         migrated = False
         for quote in state["quotes"]:
-            if not isinstance(quote, dict):
-                continue
             for key in ("sentCustomerAt", "sentSupplierAt"):
                 if key not in quote:
                     quote[key] = None

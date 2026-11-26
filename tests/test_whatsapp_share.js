@@ -11,15 +11,18 @@ const phoneSource = extractFunction('normalizePhoneNumber');
 const shareSource = extractFunction('shareQuotePdfViaWhatsApp');
 const quotePdfSource = extractFunction('generateQuotePdf');
 
-function makeSandbox(pdfResult, recipient = '+39 333 123 4567') {
+function makeSandbox(pdfResult, recipient = '+39 333 123 4567', phoneOptions = {}) {
   const calls = [];
-  const quote = { number: 'PREV-42', sentCustomerAt: null, sentSupplierAt: null };
-  const client = { name: 'Cliente Demo', phone: '+393331234567' };
+  const quote = { number: 'PREV-42', clientId: 'client-1', sentCustomerAt: null, sentSupplierAt: null };
+  const client = { name: 'Cliente Demo', phone: phoneOptions.snapshotPhone || '+390000000000' };
+  const currentClient = { name: 'Cliente Demo', phone: phoneOptions.currentPhone ?? '+393331234567' };
+  const promptDefaults = [];
   const sandbox = {
     getQuote: () => quote,
     activeClient: () => client,
+    getClient: () => currentClient,
     normalizePhoneNumber: undefined,
-    window: { prompt: () => recipient },
+    window: { prompt: (_message, defaultValue) => { promptDefaults.push(defaultValue); return recipient; } },
     generateQuotePdf: async kind => {
       calls.push(`generate:${kind}`);
       return pdfResult;
@@ -31,7 +34,7 @@ function makeSandbox(pdfResult, recipient = '+39 333 123 4567') {
     calls
   };
   vm.runInNewContext(`${phoneSource};\n${shareSource};\nthis.share = shareQuotePdfViaWhatsApp;`, sandbox);
-  return { sandbox, calls, quote };
+  return { sandbox, calls, quote, promptDefaults };
 }
 
 test('genera e salva il PDF corretto prima di aprire WhatsApp senza testo', async () => {
@@ -64,6 +67,18 @@ test('annullare la scelta del destinatario non genera PDF e non apre WhatsApp', 
   await sandbox.share('supplier');
 
   assert.deepEqual(calls, []);
+});
+
+test('il destinatario cliente suggerito usa il numero attuale in anagrafica e non la fotografia del preventivo', async () => {
+  const { sandbox, promptDefaults } = makeSandbox(
+    { path: '/pdf/quote.pdf' },
+    '+39 333 765 4321',
+    { snapshotPhone: '+390000000000', currentPhone: '+393337654321' }
+  );
+
+  await sandbox.share('customer');
+
+  assert.equal(promptDefaults[0], '+393337654321');
 });
 
 test('la pagina preventivo mostra due pulsanti e registra separatamente l’invio manuale', () => {

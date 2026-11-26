@@ -25,7 +25,9 @@ APP_LOGGER = logging.getLogger("area_tenda_preventivi")
 
 
 def normalize_whatsapp_phone(phone: str) -> str:
-    value = str(phone or "").strip().replace("(0)", "")
+    value = str(phone or "").strip()
+    italian_prefix_with_trunk = bool(re.match(r"^(?:\+|00)39\s*\(0\)", value))
+    value = re.sub(r"\(\s*0\s*\)", "0" if italian_prefix_with_trunk else "", value)
     value = re.sub(r"[\s().-]", "", value)
     if value.startswith("00"):
         value = f"+{value[2:]}"

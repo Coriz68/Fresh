@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12, pywebview, HTML/CSS/JavaScript, Node test runner, Python unittest, PyInstaller, Inno Setup.
 
-**Spec:** `docs/superpowers/specs/2026-11-26-preventivi-pro-1-0-6-design.md`; accepted user requirements are captured in the repository specification.
+**Spec:** `docs/superpowers/specs/2026-11-26-preventivi-pro-1-0-6-design.md`; the specification records the accepted user requirements.
 
 ## Global Constraints
 

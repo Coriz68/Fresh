@@ -130,6 +130,12 @@ class DesktopApiTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "numero"):
             self.api.open_whatsapp("123")
 
+    def test_open_whatsapp_preserves_italian_city_code_zero_after_country_prefix(self):
+        with patch("desktop_app.launch_whatsapp_uri") as launch_uri:
+            self.api.open_whatsapp("+39 (0)2 1234 5678")
+
+        launch_uri.assert_called_once_with("whatsapp://send?phone=390212345678")
+
     def test_open_whatsapp_reports_non_windows_or_missing_protocol_handler(self):
         with self.assertRaisesRegex(RuntimeError, "Windows"):
             launch_whatsapp_uri("whatsapp://send?phone=393331234567", platform_name="darwin")

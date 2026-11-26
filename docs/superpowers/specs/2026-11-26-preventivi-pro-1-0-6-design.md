@@ -18,10 +18,15 @@ Aggiornare il gestionale preventivi dalla base `v1.0.5`, migliorando la preparaz
 - Aprire WhatsApp Desktop Windows con `whatsapp://send?phone=...`, precompilando soltanto il destinatario; il testo resta vuoto. Se manca il numero cliente, o si invia al fornitore, l’operatore inserisce il destinatario.
 - Chiedere conferma manuale dopo che l’operatore ha completato l’invio; salvare timestamp indipendenti per PDF cliente e fornitore. L’apertura di WhatsApp e la generazione/allegato del PDF non equivalgono a invio.
 - Accettare cellulare vuoto; normalizzare i numeri italiani con `+39`, accettare numeri internazionali in formato coerente e mostrare errori formali in anagrafica. La validità formale non dichiara l’esistenza dell’account WhatsApp.
+- Conservare lo zero del prefisso geografico italiano anche se scritto tra parentesi dopo `+39`; il destinatario non deve cambiare durante la normalizzazione.
+- Se il telefono dell’anagrafica cambia o viene cancellato, usare il dato attuale per suggerire il destinatario WhatsApp; la fotografia storica continua a essere usata nel documento.
+- Non chiudere il dialogo cliente in caso di validazione errata, così gli altri campi inseriti restano disponibili per la correzione.
 - Duplicare dal preventivo aperto con nuovo ID e numero, mantenere i dati commerciali e i moduli, azzerare i metadati di invio e lasciare indipendenti originale e copia.
 - Sostituire i riferimenti di autore/brand visibili con `CorradoWEB 2026` e impostare autore/creatore PDF con lo stesso valore; mantenere i nomi tecnici e i percorsi legacy necessari a leggere installazioni e archivi esistenti.
 - Conservare nel PDF fornitore il nome cliente e tutti i dati dei moduli che già apparivano in 1.0.5, escludendo prezzi, totali, riepilogo e contatti/anagrafica ulteriori.
 - Conservare e verificare i dati al primo avvio aggiornato; fare una copia di sicurezza dell’archivio prima di scriverne una migrazione e non sovrascrivere dati non validi.
+- Applicare la stessa copia e migrazione all’apertura di un archivio esistente dal selettore cartella; rifiutare record preventivo malformati prima di qualunque riscrittura.
+- Inizializzare i due campi di invio anche sui preventivi nuovi e coprire i vecchi loghi nelle intestazioni dei 32 moduli senza cambiare disegni, campi o coordinate.
 
 ## Non obiettivi
 

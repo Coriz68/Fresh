@@ -263,7 +263,8 @@ function snapshotClient(client) {
 function normalizePhoneNumber(value) {
   const original = String(value ?? '').trim();
   if (!original) return { value: '', valid: true, empty: true };
-  let normalized = original.replace(/\(\s*0\s*\)/g, '').replace(/[\s().-]/g, '');
+  const italianPrefixWithTrunk = /^(?:\+|00)39\s*\(0\)/.test(original);
+  let normalized = original.replace(/\(\s*0\s*\)/g, italianPrefixWithTrunk ? '0' : '').replace(/[\s().-]/g, '');
   if (normalized.startsWith('00')) normalized = `+${normalized.slice(2)}`;
   else if (!normalized.startsWith('+')) normalized = `+39${normalized}`;
   const valid = /^\+[1-9]\d{7,14}$/.test(normalized);
@@ -584,7 +585,8 @@ function openFormDialog(title, body, onSubmit) {
   formDialog.querySelector('form').addEventListener('submit', async event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget).entries());
-    await onSubmit(values);
+    const shouldClose = await onSubmit(values);
+    if (shouldClose === false) return;
     formDialog.close();
   });
 }
@@ -611,13 +613,13 @@ function openClientDialog(existing = null) {
     if (!phone.valid) {
       updatePhoneValidation(formDialog.querySelector('[name="phone"]'));
       showToast('Inserisci un numero di cellulare valido oppure lascia il campo vuoto.', true);
-      return;
+      return false;
     }
     values.phone = phone.value;
     const client = { ...(existing || {}), ...values, id: existing?.id || makeId(), updatedAt: new Date().toISOString() };
     if (!client.name.trim() && !client.company.trim()) {
       showToast('Inserisci il nome del cliente o la ragione sociale.', true);
-      return;
+      return false;
     }
     if (existing) state.clients = state.clients.map(item => item.id === existing.id ? client : item);
     else state.clients.push(client);
@@ -676,6 +678,8 @@ function newQuote() {
     validityDays: 30,
     vatRate: 22,
     status: 'bozza',
+    sentCustomerAt: null,
+    sentSupplierAt: null,
     notes: '',
     items: []
   };
@@ -887,9 +891,9 @@ async function shareQuotePdfViaWhatsApp(kind) {
   if (!['customer', 'supplier'].includes(kind)) return;
   const quote = getQuote();
   if (!quote) return;
-  const client = activeClient(quote);
   try {
-    const suggestedPhone = kind === 'customer' ? (client?.phone || '') : '';
+    const currentClient = kind === 'customer' && quote.clientId ? getClient(quote.clientId) : null;
+    const suggestedPhone = kind === 'customer' ? (currentClient?.phone || '') : '';
     const recipient = window.prompt(
       kind === 'customer' ? 'Numero WhatsApp del cliente. Verifica o modifica il destinatario:' : 'Numero WhatsApp del fornitore:',
       suggestedPhone

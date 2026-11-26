@@ -22,6 +22,12 @@ test('visible application identity is CorradoWEB 2026 across the app and all mod
     assert.match(html, /CorradoWEB 2026/, `${moduleFile} deve mostrare la nuova identità`);
     assert.match(html, /doc\.setAuthor\(['"]CorradoWEB 2026['"]\)/, `${moduleFile} deve impostare l'autore PDF`);
     assert.match(html, /doc\.setCreator\(['"]CorradoWEB 2026['"]\)/, `${moduleFile} deve impostare il creatore PDF`);
+    assert.match(html, /class="logo-mask"[^>]*>CorradoWEB 2026<\/div>/, `${moduleFile} deve coprire il logo originale in schermata`);
+    assert.match(html, /ctx\.fillText\(['"]CorradoWEB 2026['"]/, `${moduleFile} deve coprire il logo originale in stampa e nel PDF`);
+    const maskWidth = moduleFile === 'tende-da-sole.html' ? 490 : 340;
+    const maskHeight = moduleFile === 'tende-da-sole.html' ? 112 : 84;
+    assert.match(html, new RegExp(`width:${maskWidth}px;height:${maskHeight}px;background:#fff`), `${moduleFile} deve coprire tutta la vecchia intestazione`);
+    assert.match(html, new RegExp(`ctx\\.fillRect\\(0,0,${maskWidth},${maskHeight}\\)`), `${moduleFile} deve coprire l'intestazione nel PDF`);
   }
 });
 
@@ -85,6 +91,7 @@ test('normalizePhoneNumber allows an empty optional value', () => {
 test('normalizePhoneNumber rejects malformed lengths', () => {
   assert.equal(runPhoneNormalizer('123').valid, false);
   assert.equal(runPhoneNormalizer('+1234567890123456').valid, false);
+  assert.deepEqual(runPhoneNormalizer('+39 (0)2 1234 5678'), { value: '+390212345678', valid: true, empty: false });
 });
 
 test('invalid phone prevents client save', async () => {
@@ -92,6 +99,7 @@ test('invalid phone prevents client save', async () => {
     .map(extractFunction);
   assert.ok(functions.every(Boolean), 'Le funzioni reali del modulo clienti devono essere presenti.');
   let submit;
+  let closeCalls = 0;
   const errors = [];
   const phoneListeners = [];
   const phoneInput = {
@@ -104,7 +112,7 @@ test('invalid phone prevents client save', async () => {
   const formDialog = {
     innerHTML: '',
     showModal() {},
-    close() {},
+    close() { closeCalls++; },
     querySelector(selector) {
       if (selector === '[data-dialog-close]') return { addEventListener() {} };
       if (selector === 'form') return { addEventListener: (_event, listener) => { submit = listener; } };
@@ -136,6 +144,27 @@ test('invalid phone prevents client save', async () => {
 
   assert.deepEqual(sandbox.state.clients, []);
   assert.ok(errors.some(message => /telefono|numero/i.test(message)));
+  assert.equal(closeCalls, 0, 'Il dialogo deve restare aperto per correggere il numero e mantenere gli altri dati inseriti.');
+});
+
+test('newQuote initializes both send timestamps', () => {
+  const newQuoteSource = extractFunction('newQuote');
+  assert.ok(newQuoteSource, 'La creazione del preventivo deve restare una funzione osservabile.');
+  const state = { quotes: [] };
+  const sandbox = {
+    state,
+    makeId: () => 'new-quote',
+    localDateString: () => '2026-11-26',
+    Date,
+    persistNow() {},
+    render() {}
+  };
+  vm.runInNewContext(`${newQuoteSource}\nthis.newQuote = newQuote;`, sandbox);
+
+  sandbox.newQuote();
+
+  assert.equal(state.quotes[0].sentCustomerAt, null);
+  assert.equal(state.quotes[0].sentSupplierAt, null);
 });
 
 test('customer and supplier send timestamps are independent', async () => {
