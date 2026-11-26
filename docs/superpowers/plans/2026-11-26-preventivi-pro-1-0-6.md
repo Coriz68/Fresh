@@ -72,11 +72,11 @@
 - Consumes: normalized international phone string from Task 2.
 - Produces: `DesktopApi.open_whatsapp(phone: str) -> {ok: true}`; Windows URI is exactly `whatsapp://send?phone=<digits>`. Front-end asks for a recipient when customer phone is blank and always asks for supplier recipient, since suppliers have no address book entry.
 
-- [ ] **Step 1: Write failing tests** `test_open_whatsapp_launches_desktop_protocol_with_phone_only`, `test_open_whatsapp_rejects_invalid_phone`, and `test_open_whatsapp_reports_non_windows_or_missing_protocol_handler`. Assert no message/query text and no browser call.
-- [ ] **Step 2: Run** `python3 -m unittest tests.test_desktop_api -v`. Expected: the new tests fail against the current browser/message implementation.
-- [ ] **Step 3: Implement** validation and Windows URI dispatch through the OS protocol association. Return clear errors for unsupported OS/failed launch. Do not use clipboard, UI automation, webbrowser, or send API.
-- [ ] **Step 4: Run** `python3 -m unittest tests.test_desktop_api -v`. Expected: all desktop API tests pass.
-- [ ] **Step 5: Run** `python3 -m unittest discover -s tests -v`. Expected: all Python tests pass.
+- [x] **Step 1: Write failing tests** `test_open_whatsapp_launches_desktop_protocol_with_phone_only`, `test_open_whatsapp_rejects_invalid_phone`, and `test_open_whatsapp_reports_non_windows_or_missing_protocol_handler`. Assert no message/query text and no browser call.
+- [x] **Step 2: Run** `python3 -m unittest tests.test_desktop_api -v`. Expected: the new tests fail against the current browser/message implementation.
+- [x] **Step 3: Implement** validation and Windows URI dispatch through the OS protocol association. Return clear errors for unsupported OS/failed launch. Do not use clipboard, UI automation, webbrowser, or send API.
+- [x] **Step 4: Run** `python3 -m unittest tests.test_desktop_api -v`. Expected: all desktop API tests pass.
+- [x] **Step 5: Run** `python3 -m unittest discover -s tests -v`. Expected: all Python tests pass.
 
 ### Task 4: Show independent send status and confirmation
 

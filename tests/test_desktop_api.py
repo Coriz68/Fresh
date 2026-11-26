@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from desktop_app import DesktopApi
+from desktop_app import DesktopApi, launch_whatsapp_uri
 from desktop_app import configure_app_logging
 from local_store import LocalStore
 
@@ -119,21 +119,23 @@ class DesktopApiTests(unittest.TestCase):
         self.assertFalse(hasattr(self.api, "window"))
         self.assertEqual(set(dir(self.api)), DesktopApi.EXPOSED_METHODS)
 
-    def test_open_whatsapp_builds_fixed_click_to_chat_link_with_encoded_message(self):
-        with patch("desktop_app.webbrowser.open", return_value=True) as open_browser:
-            result = self.api.open_whatsapp("Preventivo 42 · Cliente Demo")
+    def test_open_whatsapp_launches_desktop_protocol_with_phone_only(self):
+        with patch("desktop_app.launch_whatsapp_uri") as launch_uri:
+            result = self.api.open_whatsapp("+39 333 123 4567")
 
         self.assertEqual(result, {"ok": True})
-        open_browser.assert_called_once_with(
-            "https://wa.me/?text=Preventivo+42+%C2%B7+Cliente+Demo", new=2
-        )
+        launch_uri.assert_called_once_with("whatsapp://send?phone=393331234567")
 
-    def test_open_whatsapp_rejects_empty_message_and_reports_browser_failure(self):
-        with self.assertRaisesRegex(ValueError, "messaggio"):
-            self.api.open_whatsapp("  ")
-        with patch("desktop_app.webbrowser.open", return_value=False):
-            with self.assertRaisesRegex(RuntimeError, "WhatsApp"):
-                self.api.open_whatsapp("Preventivo 42")
+    def test_open_whatsapp_rejects_invalid_phone(self):
+        with self.assertRaisesRegex(ValueError, "numero"):
+            self.api.open_whatsapp("123")
+
+    def test_open_whatsapp_reports_non_windows_or_missing_protocol_handler(self):
+        with self.assertRaisesRegex(RuntimeError, "Windows"):
+            launch_whatsapp_uri("whatsapp://send?phone=393331234567", platform_name="darwin")
+        with patch("desktop_app.os.startfile", create=True) as startfile:
+            launch_whatsapp_uri("whatsapp://send?phone=393331234567", platform_name="nt")
+        startfile.assert_called_once_with("whatsapp://send?phone=393331234567")
 
     def test_frontend_log_accepts_only_event_codes_and_omits_client_text(self):
         logger, log_path = configure_app_logging(self.root / "logs")
