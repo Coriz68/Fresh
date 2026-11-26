@@ -129,12 +129,13 @@ class WhatsAppWindowsTests(unittest.TestCase):
         self.desktop = FakeDesktop([app_window, self.dialog])
         return self.desktop
 
-    def run_attach(self, *, timeout_seconds=0.02, desktop=None):
+    def run_attach(self, *, timeout_seconds=0.02, desktop=None, window_owner_checker=None):
         return attach_pdf_to_open_chat(
             self.pdf_path,
             timeout_seconds=timeout_seconds,
             desktop_factory=lambda **kwargs: desktop or self.desktop,
             process_name_resolver=lambda window: window.process_name,
+            window_owner_checker=window_owner_checker,
             platform_name="nt",
         )
 
@@ -149,6 +150,32 @@ class WhatsAppWindowsTests(unittest.TestCase):
         self.assertEqual(self.dialog.controls[0].value, str(self.pdf_path.resolve()))
         self.assertEqual(self.dialog.controls[1].clicked, 1)
         self.assertTrue(any(control.name == self.pdf_path.name for control in self.desktop._windows[0].controls))
+        self.assertEqual(self.send_button.clicked, 0)
+
+    def test_accepts_system_hosted_file_picker_only_when_owned_by_whatsapp(self):
+        desktop = self.make_desktop()
+        self.dialog.process_name = "ApplicationFrameHost.exe"
+
+        self.run_attach(
+            desktop=desktop,
+            window_owner_checker=lambda dialog, app: dialog is self.dialog and app is desktop._windows[0],
+        )
+
+        self.assertTrue(any(control.name == self.pdf_path.name for control in desktop._windows[0].controls))
+        self.assertEqual(self.send_button.clicked, 0)
+
+    def test_rejects_system_hosted_file_picker_not_owned_by_whatsapp(self):
+        desktop = self.make_desktop()
+        self.dialog.process_name = "ApplicationFrameHost.exe"
+
+        with self.assertRaisesRegex(RuntimeError, "selettore file"):
+            self.run_attach(
+                desktop=desktop,
+                window_owner_checker=lambda _dialog, _app: False,
+                timeout_seconds=0,
+            )
+
+        self.assertEqual(self.dialog.controls[0].value, None)
         self.assertEqual(self.send_button.clicked, 0)
 
     def test_does_not_report_success_until_pdf_name_is_visible_in_whatsapp(self):

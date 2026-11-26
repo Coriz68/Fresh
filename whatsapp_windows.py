@@ -62,20 +62,61 @@ def _visible(control: Any) -> bool:
         return False
 
 
+def _window_handle(window: Any) -> int:
+    element_info = getattr(window, "element_info", None)
+    handle = getattr(element_info, "handle", None) or getattr(window, "handle", None)
+    return int(handle or 0)
+
+
+def _owned_by_window(window: Any, owner_window: Any) -> bool:
+    """Match a system-hosted file picker to the exact WhatsApp window that opened it."""
+    if os.name != "nt":
+        return False
+    target = _window_handle(owner_window)
+    current = _window_handle(window)
+    if not target or not current:
+        return False
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.GetWindow.restype = wintypes.HWND
+    user32.GetParent.argtypes = [wintypes.HWND]
+    user32.GetParent.restype = wintypes.HWND
+    seen: set[int] = set()
+    for _ in range(12):
+        if not current or current in seen:
+            break
+        if current == target:
+            return True
+        seen.add(current)
+        owner = int(user32.GetWindow(current, 4) or 0)  # GW_OWNER
+        parent = int(user32.GetParent(current) or 0)
+        current = owner or parent
+    return False
+
+
 def _unique_window(
     windows: list[Any],
     process_name_resolver: Callable[[Any], str],
     expected_process: str,
     expected_titles: frozenset[str] | None = None,
+    *,
+    owner_window: Any | None = None,
+    window_owner_checker: Callable[[Any, Any], bool] | None = None,
 ) -> Any | None:
     matches = []
     for window in windows:
         if not _visible(window):
             continue
         try:
-            if process_name_resolver(window).casefold() != expected_process:
-                continue
+            same_process = process_name_resolver(window).casefold() == expected_process
         except Exception:
+            same_process = False
+        if not same_process and not (
+            owner_window is not None
+            and window_owner_checker is not None
+            and window_owner_checker(window, owner_window)
+        ):
             continue
         if expected_titles is not None and _control_name(window) not in expected_titles:
             continue
@@ -126,6 +167,7 @@ def attach_pdf_to_open_chat(
     timeout_seconds: float = 15,
     desktop_factory: Callable[..., Any] | None = None,
     process_name_resolver: Callable[[Any], str] | None = None,
+    window_owner_checker: Callable[[Any, Any], bool] | None = None,
     platform_name: str | None = None,
 ) -> None:
     """Attach one PDF to the already-open, user-confirmed WhatsApp chat.
@@ -152,6 +194,7 @@ def attach_pdf_to_open_chat(
     process_name_resolver = process_name_resolver or (
         lambda window: _windows_process_name(window.element_info.process)
     )
+    window_owner_checker = window_owner_checker or _owned_by_window
 
     whatsapp_window = _unique_window(
         desktop.windows(), process_name_resolver, WHATSAPP_PROCESS
@@ -191,6 +234,8 @@ def attach_pdf_to_open_chat(
                 process_name_resolver,
                 WHATSAPP_PROCESS,
                 OPEN_DIALOG_NAMES,
+                owner_window=whatsapp_window,
+                window_owner_checker=window_owner_checker,
             ),
             timeout_seconds,
             "apertura del selettore file",

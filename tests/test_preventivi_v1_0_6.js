@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(new URL('../gestionale.js', `file://${__dirname}/`), 'utf8');
 const extractFunction = name => source.match(new RegExp(`(?:async )?function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`))?.[0];
 
-test('visible application identity is CorradoWEB 2026 across the app and all modules', () => {
+test('CorradoWEB identity remains in the app but is removed from order modules', () => {
   const appHtml = fs.readFileSync(new URL('../Gestione_preventivi.html', `file://${__dirname}/`), 'utf8');
   const catalogHtml = fs.readFileSync(new URL('../Apri_catalogo.html', `file://${__dirname}/`), 'utf8');
   const moduleDirectory = new URL('../Moduli/', `file://${__dirname}/`);
@@ -19,11 +19,7 @@ test('visible application identity is CorradoWEB 2026 across the app and all mod
   assert.equal(modules.length, 32);
   for (const moduleFile of modules) {
     const html = fs.readFileSync(new URL(moduleFile, moduleDirectory), 'utf8');
-    assert.match(html, /CorradoWEB 2026/, `${moduleFile} deve mostrare la nuova identità`);
-    assert.match(html, /doc\.setAuthor\(['"]CorradoWEB 2026['"]\)/, `${moduleFile} deve impostare l'autore PDF`);
-    assert.match(html, /doc\.setCreator\(['"]CorradoWEB 2026['"]\)/, `${moduleFile} deve impostare il creatore PDF`);
-    assert.match(html, /class="logo-mask"[^>]*>CorradoWEB 2026<\/div>/, `${moduleFile} deve coprire il logo originale in schermata`);
-    assert.match(html, /ctx\.fillText\(['"]CorradoWEB 2026['"]/, `${moduleFile} deve coprire il logo originale in stampa e nel PDF`);
+    assert.ok(!/CorradoWEB\s*2026/i.test(html), `${moduleFile} non deve mostrare la dicitura nei moduli o nei PDF`);
     const maskWidth = moduleFile === 'tende-da-sole.html' ? 490 : 340;
     const maskHeight = moduleFile === 'tende-da-sole.html' ? 112 : 84;
     assert.match(html, new RegExp(`width:${maskWidth}px;height:${maskHeight}px;background:#fff`), `${moduleFile} deve coprire tutta la vecchia intestazione`);
