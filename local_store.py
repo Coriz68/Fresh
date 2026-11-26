@@ -7,6 +7,7 @@ import binascii
 import json
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,10 @@ class LocalStore:
             raise FileNotFoundError(f"Database non trovato: {database_path}")
         else:
             state = self._read_database(database_path)
+            state, migrated = self._migrate_quote_send_fields(state)
+            if migrated:
+                self._create_pre_migration_backup(database_path)
+                self._atomic_write_json(database_path, state)
         return {
             "state": state,
             "paths": self.paths,
@@ -235,6 +240,39 @@ class LocalStore:
             or not isinstance(state.get("company"), dict)
         ):
             raise ValueError("La struttura del database non è valida.")
+
+    @staticmethod
+    def _migrate_quote_send_fields(state: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        migrated = False
+        for quote in state["quotes"]:
+            if not isinstance(quote, dict):
+                continue
+            for key in ("sentCustomerAt", "sentSupplierAt"):
+                if key not in quote:
+                    quote[key] = None
+                    migrated = True
+        return state, migrated
+
+    @staticmethod
+    def _create_pre_migration_backup(database_path: Path) -> Path:
+        base = database_path.with_name(f"{database_path.stem}.pre-1.0.6.backup{database_path.suffix}")
+        number = 1
+        while True:
+            candidate = base if number == 1 else base.with_name(
+                f"{base.stem}-{number}{base.suffix}"
+            )
+            try:
+                with database_path.open("rb") as source, candidate.open("xb") as backup:
+                    shutil.copyfileobj(source, backup)
+                    backup.flush()
+                    os.fsync(backup.fileno())
+                return candidate
+            except FileExistsError:
+                number += 1
+            except OSError:
+                if candidate.exists():
+                    candidate.unlink()
+                raise
 
     @staticmethod
     def _existing_directory(folder: str | Path, kind: str) -> Path:
