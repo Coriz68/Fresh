@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 
 WHATSAPP_PROCESS = "whatsapp.exe"
+WHATSAPP_APP_USER_MODEL_ID = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"
 ATTACH_NAMES = frozenset({"attach", "allega"})
 DOCUMENT_NAMES = frozenset({"document", "documento"})
 OPEN_DIALOG_NAMES = frozenset({"open", "apri"})
@@ -44,6 +45,115 @@ def _windows_process_name(process_id: int) -> str:
         return Path(buffer.value).name.casefold()
     finally:
         kernel32.CloseHandle(handle)
+
+
+class _Guid(ctypes.Structure):
+    _fields_ = [
+        ("data1", wintypes.DWORD),
+        ("data2", wintypes.WORD),
+        ("data3", wintypes.WORD),
+        ("data4", wintypes.BYTE * 8),
+    ]
+
+
+class _PropertyKey(ctypes.Structure):
+    _fields_ = [("fmtid", _Guid), ("pid", wintypes.DWORD)]
+
+
+class _PropVariantValue(ctypes.Union):
+    _fields_ = [("pointer", ctypes.c_void_p), ("number", ctypes.c_longlong)]
+
+
+class _PropVariant(ctypes.Structure):
+    _anonymous_ = ("value",)
+    _fields_ = [
+        ("vt", wintypes.WORD),
+        ("reserved1", wintypes.WORD),
+        ("reserved2", wintypes.WORD),
+        ("reserved3", wintypes.WORD),
+        ("value", _PropVariantValue),
+    ]
+
+
+def _guid(value: str) -> _Guid:
+    import uuid
+
+    parsed = uuid.UUID(value)
+    tail = (wintypes.BYTE * 8).from_buffer_copy(parsed.bytes[8:])
+    return _Guid(parsed.time_low, parsed.time_mid, parsed.time_hi_version, tail)
+
+
+def _windows_app_user_model_id(window: Any) -> str:
+    """Read the shell AppUserModelID assigned to a top-level window."""
+    if os.name != "nt":
+        return ""
+    handle = _window_handle(window)
+    if not handle:
+        return ""
+
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    shell32.SHGetPropertyStoreForWindow.argtypes = [
+        wintypes.HWND,
+        ctypes.POINTER(_Guid),
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    shell32.SHGetPropertyStoreForWindow.restype = ctypes.c_long
+    iid_property_store = _guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")
+    property_store = ctypes.c_void_p()
+    result = shell32.SHGetPropertyStoreForWindow(
+        handle, ctypes.byref(iid_property_store), ctypes.byref(property_store)
+    )
+    if result < 0 or not property_store.value:
+        return ""
+
+    # PKEY_AppUserModel_ID = {9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}, PID 5.
+    key = _PropertyKey(
+        _guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5
+    )
+    variant = _PropVariant()
+    vtable = None
+    try:
+        vtable = ctypes.cast(
+            property_store,
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)),
+        ).contents
+        get_value = ctypes.WINFUNCTYPE(
+            ctypes.c_long,
+            ctypes.c_void_p,
+            ctypes.POINTER(_PropertyKey),
+            ctypes.POINTER(_PropVariant),
+        )(vtable[5])
+        if get_value(property_store, ctypes.byref(key), ctypes.byref(variant)) < 0:
+            return ""
+        # VT_LPWSTR is the normal representation of PKEY_AppUserModel_ID.
+        return ctypes.wstring_at(variant.pointer) if variant.vt == 31 and variant.pointer else ""
+    except (AttributeError, OSError, TypeError, ValueError):
+        return ""
+    finally:
+        if variant.vt:
+            ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+            ole32.PropVariantClear.argtypes = [ctypes.POINTER(_PropVariant)]
+            ole32.PropVariantClear.restype = ctypes.c_long
+            ole32.PropVariantClear(ctypes.byref(variant))
+        if vtable is not None:
+            release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtable[2])
+            release(property_store)
+
+
+def _is_whatsapp_window(
+    window: Any,
+    process_name_resolver: Callable[[Any], str],
+    app_user_model_id_resolver: Callable[[Any], str],
+) -> bool:
+    try:
+        if process_name_resolver(window).casefold() == WHATSAPP_PROCESS:
+            return True
+    except Exception:
+        pass
+    try:
+        return app_user_model_id_resolver(window).casefold() == WHATSAPP_APP_USER_MODEL_ID.casefold()
+    except Exception:
+        return False
 
 
 def _control_name(control: Any) -> str:
@@ -104,15 +214,22 @@ def _unique_window(
     *,
     owner_window: Any | None = None,
     window_owner_checker: Callable[[Any, Any], bool] | None = None,
+    app_user_model_id_resolver: Callable[[Any], str] | None = None,
 ) -> Any | None:
     matches = []
     for window in windows:
         if not _visible(window):
             continue
-        try:
-            same_process = process_name_resolver(window).casefold() == expected_process
-        except Exception:
-            same_process = False
+        same_process = _is_whatsapp_window(
+            window,
+            process_name_resolver,
+            app_user_model_id_resolver or (lambda _window: ""),
+        ) if expected_process == WHATSAPP_PROCESS else False
+        if not same_process:
+            try:
+                same_process = process_name_resolver(window).casefold() == expected_process
+            except Exception:
+                same_process = False
         if not same_process and not (
             owner_window is not None
             and window_owner_checker is not None
@@ -157,15 +274,15 @@ def _pdf_preview_window(
     filename: str,
     process_name_resolver: Callable[[Any], str],
     window_owner_checker: Callable[[Any, Any], bool],
+    app_user_model_id_resolver: Callable[[Any], str],
 ) -> Any | None:
     candidates = []
     for window in windows:
         if not _visible(window):
             continue
-        try:
-            belongs_to_whatsapp = process_name_resolver(window).casefold() == WHATSAPP_PROCESS
-        except Exception:
-            belongs_to_whatsapp = False
+        belongs_to_whatsapp = _is_whatsapp_window(
+            window, process_name_resolver, app_user_model_id_resolver
+        )
         if not belongs_to_whatsapp and not window_owner_checker(window, whatsapp_window):
             continue
         if not any(
@@ -211,6 +328,7 @@ def attach_pdf_to_open_chat(
     desktop_factory: Callable[..., Any] | None = None,
     process_name_resolver: Callable[[Any], str] | None = None,
     window_owner_checker: Callable[[Any, Any], bool] | None = None,
+    app_user_model_id_resolver: Callable[[Any], str] | None = None,
     platform_name: str | None = None,
 ) -> None:
     """Attach one PDF to the already-open, user-confirmed WhatsApp chat.
@@ -237,10 +355,14 @@ def attach_pdf_to_open_chat(
     process_name_resolver = process_name_resolver or (
         lambda window: _windows_process_name(window.element_info.process)
     )
+    app_user_model_id_resolver = app_user_model_id_resolver or _windows_app_user_model_id
     window_owner_checker = window_owner_checker or _owned_by_window
 
     whatsapp_window = _unique_window(
-        desktop.windows(), process_name_resolver, WHATSAPP_PROCESS
+        desktop.windows(),
+        process_name_resolver,
+        WHATSAPP_PROCESS,
+        app_user_model_id_resolver=app_user_model_id_resolver,
     )
     if whatsapp_window is None:
         raise RuntimeError("WhatsApp Desktop non è aperto; apri e verifica la chat prima di allegare il PDF.")
@@ -306,6 +428,7 @@ def attach_pdf_to_open_chat(
                 filename_label,
                 process_name_resolver,
                 window_owner_checker,
+                app_user_model_id_resolver,
             ),
             timeout_seconds,
             "verifica dell’anteprima del PDF in WhatsApp",

@@ -37,9 +37,10 @@ class FakeControl:
 
 
 class FakeWindow:
-    def __init__(self, title, process_name, controls=None, visible=True):
+    def __init__(self, title, process_name, controls=None, visible=True, app_user_model_id=""):
         self.title = title
         self.process_name = process_name
+        self.app_user_model_id = app_user_model_id
         self.controls = controls or []
         self.visible = visible
         self.focus_count = 0
@@ -84,7 +85,7 @@ class WhatsAppWindowsTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def make_desktop(self, *, duplicate_attach=False, duplicate_document=False, no_dialog=False, cancelled=False, no_preview=False, separate_preview=False):
+    def make_desktop(self, *, duplicate_attach=False, duplicate_document=False, no_dialog=False, cancelled=False, no_preview=False, separate_preview=False, store_windows=False):
         app_controls = []
 
         def show_dialog():
@@ -106,7 +107,14 @@ class WhatsAppWindowsTests(unittest.TestCase):
         if duplicate_attach:
             attach_buttons.append(FakeControl("Allega", "Button", on_click=show_document_items))
         app_controls.extend(attach_buttons + document_items + [self.send_button])
-        app_window = FakeWindow("WhatsApp", "WhatsApp.exe", app_controls)
+        app_window = FakeWindow(
+            "WhatsApp",
+            "ApplicationFrameHost.exe" if store_windows else "WhatsApp.exe",
+            app_controls,
+            app_user_model_id=(
+                "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App" if store_windows else ""
+            ),
+        )
 
         if no_dialog:
             self.document_item.on_click = lambda: None
@@ -127,7 +135,12 @@ class WhatsAppWindowsTests(unittest.TestCase):
                 if separate_preview:
                     app_controls.append(FakeControl(self.pdf_path.name, "Text"))
                     self.preview_window = FakeWindow(
-                        "Send document", "WhatsApp.exe", [filename_control, self.send_button]
+                        "Send document",
+                        "ApplicationFrameHost.exe" if store_windows else "WhatsApp.exe",
+                        [filename_control, self.send_button],
+                        app_user_model_id=(
+                            "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App" if store_windows else ""
+                        ),
                     )
                     self.desktop._windows.append(self.preview_window)
                 else:
@@ -138,13 +151,14 @@ class WhatsAppWindowsTests(unittest.TestCase):
         self.desktop = FakeDesktop([app_window, self.dialog])
         return self.desktop
 
-    def run_attach(self, *, timeout_seconds=0.02, desktop=None, window_owner_checker=None):
+    def run_attach(self, *, timeout_seconds=0.02, desktop=None, window_owner_checker=None, app_user_model_id_resolver=None):
         return attach_pdf_to_open_chat(
             self.pdf_path,
             timeout_seconds=timeout_seconds,
             desktop_factory=lambda **kwargs: desktop or self.desktop,
             process_name_resolver=lambda window: window.process_name,
             window_owner_checker=window_owner_checker,
+            app_user_model_id_resolver=app_user_model_id_resolver,
             platform_name="nt",
         )
 
@@ -208,6 +222,21 @@ class WhatsAppWindowsTests(unittest.TestCase):
         desktop = FakeDesktop([])
         with self.assertRaisesRegex(RuntimeError, "WhatsApp"):
             self.run_attach(desktop=desktop)
+
+    def test_recognizes_microsoft_store_whatsapp_by_app_user_model_id(self):
+        desktop = self.make_desktop(separate_preview=True, store_windows=True)
+        app_window = desktop._windows[0]
+
+        self.run_attach(
+            desktop=desktop,
+            app_user_model_id_resolver=lambda window: window.app_user_model_id,
+            window_owner_checker=lambda dialog, app: dialog is self.dialog and app is app_window,
+        )
+
+        self.assertEqual(self.attach_button.clicked, 1)
+        self.assertEqual(app_window.focus_count, 1)
+        self.assertEqual(self.preview_window.focus_count, 1)
+        self.assertEqual(self.send_button.clicked, 0)
 
     def test_aborts_when_whatsapp_window_is_ambiguous(self):
         desktop = self.make_desktop()
