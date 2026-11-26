@@ -95,4 +95,4 @@
 
 - [x] Eseguire test Python, JavaScript, controlli sintassi e `git diff --check`. Il workflow Windows resta da eseguire sul branch dedicato; la procedura può consumare minuti GitHub e non è stata avviata per rispettare il vincolo di costo.
 - [ ] Su Windows 10/11 isolato, con dati fittizi, provare separatamente PDF cliente e fornitore; controllare destinatario, PDF allegato visibile, appunti invariati, assenza d’invio e fallback quando la UI WhatsApp non corrisponde.
-- [ ] Annotare in GitHub Issue #1 i risultati reali e i limiti; lasciare la release pubblicata 1.0.6 invariata e non pubblicare una nuova release senza approvazione.
+- [x] Annotare in GitHub Issue #1 i risultati reali e i limiti; lasciare la release pubblicata 1.0.6 invariata e non pubblicare una nuova release senza approvazione. Il commento con il branch e la richiesta di collaudo è stato pubblicato.

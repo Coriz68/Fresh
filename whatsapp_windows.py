@@ -165,6 +165,12 @@ def attach_pdf_to_open_chat(
         attach_button = _unique_control(
             whatsapp_window, ATTACH_NAMES, frozenset({"button"}), "Allega"
         )
+        filename_label = pdf_path.name.casefold()
+        initial_filename_count = sum(
+            1
+            for control in whatsapp_window.descendants()
+            if _visible(control) and filename_label in _control_name(control)
+        )
         attach_button.click_input()
         document_item = _wait_for(
             lambda: _unique_control(
@@ -204,6 +210,15 @@ def attach_pdf_to_open_chat(
             lambda: not _visible(file_dialog),
             timeout_seconds,
             "chiusura del selettore file",
+        )
+        _wait_for(
+            lambda: sum(
+                1
+                for control in whatsapp_window.descendants()
+                if _visible(control) and filename_label in _control_name(control)
+            ) > initial_filename_count,
+            timeout_seconds,
+            "verifica dell’anteprima del PDF in WhatsApp",
         )
     except RuntimeError as error:
         if "allegato annullato" in str(error).casefold() or "timeout" in str(error).casefold():

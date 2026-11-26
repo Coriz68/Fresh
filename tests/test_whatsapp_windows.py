@@ -83,7 +83,9 @@ class WhatsAppWindowsTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def make_desktop(self, *, duplicate_attach=False, duplicate_document=False, no_dialog=False, cancelled=False):
+    def make_desktop(self, *, duplicate_attach=False, duplicate_document=False, no_dialog=False, cancelled=False, no_preview=False):
+        app_controls = []
+
         def show_dialog():
             if self.dialog:
                 self.dialog.visible = True
@@ -102,7 +104,8 @@ class WhatsAppWindowsTests(unittest.TestCase):
         attach_buttons = [self.attach_button]
         if duplicate_attach:
             attach_buttons.append(FakeControl("Allega", "Button", on_click=show_document_items))
-        app_window = FakeWindow("WhatsApp", "WhatsApp.exe", attach_buttons + document_items + [self.send_button])
+        app_controls.extend(attach_buttons + document_items + [self.send_button])
+        app_window = FakeWindow("WhatsApp", "WhatsApp.exe", app_controls)
 
         if no_dialog:
             self.document_item.on_click = lambda: None
@@ -116,7 +119,12 @@ class WhatsAppWindowsTests(unittest.TestCase):
             "Edit",
             on_set=cancel_picker if cancelled else None,
         )
-        open_button = FakeControl("Open", "Button", on_click=lambda: setattr(self.dialog, "visible", False))
+        def accept_pdf():
+            self.dialog.visible = False
+            if not no_preview:
+                app_controls.append(FakeControl(self.pdf_path.name, "Text"))
+
+        open_button = FakeControl("Open", "Button", on_click=accept_pdf)
         self.dialog = FakeWindow("Open", "WhatsApp.exe", [filename, open_button], visible=False)
         self.desktop = FakeDesktop([app_window, self.dialog])
         return self.desktop
@@ -140,6 +148,14 @@ class WhatsAppWindowsTests(unittest.TestCase):
         self.assertEqual(self.document_item.clicked, 1)
         self.assertEqual(self.dialog.controls[0].value, str(self.pdf_path.resolve()))
         self.assertEqual(self.dialog.controls[1].clicked, 1)
+        self.assertTrue(any(control.name == self.pdf_path.name for control in self.desktop._windows[0].controls))
+        self.assertEqual(self.send_button.clicked, 0)
+
+    def test_does_not_report_success_until_pdf_name_is_visible_in_whatsapp(self):
+        desktop = self.make_desktop(no_preview=True)
+
+        with self.assertRaisesRegex(RuntimeError, "anteprima"):
+            self.run_attach(desktop=desktop, timeout_seconds=0)
         self.assertEqual(self.send_button.clicked, 0)
 
     def test_aborts_when_whatsapp_window_is_missing(self):
