@@ -16,6 +16,7 @@ DOCUMENT_NAMES = frozenset({"document", "documento"})
 OPEN_DIALOG_NAMES = frozenset({"open", "apri"})
 FILE_NAME_NAMES = frozenset({"file name:", "nome file:"})
 OPEN_BUTTON_NAMES = frozenset({"open", "apri"})
+SEND_NAMES = frozenset({"send", "invia", "send file", "invia file"})
 
 
 def _windows_process_name(process_id: int) -> str:
@@ -150,6 +151,48 @@ def _unique_control(
     return matches[0]
 
 
+def _pdf_preview_window(
+    windows: list[Any],
+    whatsapp_window: Any,
+    filename: str,
+    process_name_resolver: Callable[[Any], str],
+    window_owner_checker: Callable[[Any, Any], bool],
+) -> Any | None:
+    candidates = []
+    for window in windows:
+        if not _visible(window):
+            continue
+        try:
+            belongs_to_whatsapp = process_name_resolver(window).casefold() == WHATSAPP_PROCESS
+        except Exception:
+            belongs_to_whatsapp = False
+        if not belongs_to_whatsapp and not window_owner_checker(window, whatsapp_window):
+            continue
+        if not any(
+            _visible(control) and filename in _control_name(control)
+            for control in window.descendants()
+        ):
+            continue
+        candidates.append(window)
+
+    if len(candidates) <= 1:
+        return candidates[0] if candidates else None
+    send_windows = [
+        window
+        for window in candidates
+        if window is not whatsapp_window
+        if any(
+            _visible(control)
+            and _control_name(control) in SEND_NAMES
+            and _control_type(control) == "button"
+            for control in window.descendants()
+        )
+    ]
+    if len(send_windows) == 1:
+        return send_windows[0]
+    raise RuntimeError("L’anteprima PDF di WhatsApp non è univoca; allegato annullato.")
+
+
 def _wait_for(predicate: Callable[[], Any], timeout_seconds: float, description: str) -> Any:
     deadline = time.monotonic() + max(0, timeout_seconds)
     while True:
@@ -256,18 +299,24 @@ def attach_pdf_to_open_chat(
             timeout_seconds,
             "chiusura del selettore file",
         )
-        _wait_for(
-            lambda: sum(
-                1
-                for control in whatsapp_window.descendants()
-                if _visible(control) and filename_label in _control_name(control)
-            ) > initial_filename_count,
+        preview_window = _wait_for(
+            lambda: _pdf_preview_window(
+                desktop.windows(),
+                whatsapp_window,
+                filename_label,
+                process_name_resolver,
+                window_owner_checker,
+            ),
             timeout_seconds,
             "verifica dell’anteprima del PDF in WhatsApp",
         )
-        # The pywebview call can reactivate its own window as it returns to JavaScript.
-        # Bring the verified WhatsApp preview back to the foreground as the final UI action.
-        whatsapp_window.set_focus()
+        if preview_window is whatsapp_window and initial_filename_count:
+            raise RuntimeError("L’anteprima PDF di WhatsApp non è univoca; allegato annullato.")
+        if not callable(getattr(preview_window, "set_focus", None)):
+            raise RuntimeError("Non riesco a mantenere in primo piano l’anteprima WhatsApp; allegato annullato.")
+        # Focus the window that actually contains the PDF preview, which may be a
+        # separate top-level modal instead of the chat window.
+        preview_window.set_focus()
     except RuntimeError as error:
         if "allegato annullato" in str(error).casefold() or "timeout" in str(error).casefold():
             raise

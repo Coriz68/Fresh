@@ -84,7 +84,7 @@ class WhatsAppWindowsTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def make_desktop(self, *, duplicate_attach=False, duplicate_document=False, no_dialog=False, cancelled=False, no_preview=False):
+    def make_desktop(self, *, duplicate_attach=False, duplicate_document=False, no_dialog=False, cancelled=False, no_preview=False, separate_preview=False):
         app_controls = []
 
         def show_dialog():
@@ -123,7 +123,15 @@ class WhatsAppWindowsTests(unittest.TestCase):
         def accept_pdf():
             self.dialog.visible = False
             if not no_preview:
-                app_controls.append(FakeControl(self.pdf_path.name, "Text"))
+                filename_control = FakeControl(self.pdf_path.name, "Text")
+                if separate_preview:
+                    app_controls.append(FakeControl(self.pdf_path.name, "Text"))
+                    self.preview_window = FakeWindow(
+                        "Send document", "WhatsApp.exe", [filename_control, self.send_button]
+                    )
+                    self.desktop._windows.append(self.preview_window)
+                else:
+                    app_controls.append(filename_control)
 
         open_button = FakeControl("Open", "Button", on_click=accept_pdf)
         self.dialog = FakeWindow("Open", "WhatsApp.exe", [filename, open_button], visible=False)
@@ -186,6 +194,15 @@ class WhatsAppWindowsTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "anteprima"):
             self.run_attach(desktop=desktop, timeout_seconds=0)
         self.assertEqual(self.send_button.clicked, 0)
+
+    def test_keeps_a_separate_whatsapp_pdf_preview_window_in_front(self):
+        desktop = self.make_desktop(separate_preview=True)
+
+        self.run_attach(desktop=desktop)
+
+        self.assertEqual(desktop._windows[0].focus_count, 1, "Non riportare il focus alla chat se la preview è un’altra finestra.")
+        self.assertEqual(self.preview_window.focus_count, 1)
+        self.assertEqual(self.preview_window.controls[1].clicked, 0)
 
     def test_aborts_when_whatsapp_window_is_missing(self):
         desktop = FakeDesktop([])
