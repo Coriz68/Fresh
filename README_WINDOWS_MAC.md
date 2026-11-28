@@ -1,6 +1,6 @@
-# Gestionale preventivi — versione 1.0.18 · CorradoWEB 2026
+# Gestionale preventivi — versione 1.0.19 · CorradoWEB 2026
 
-Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0.18 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
+Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0.19 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
 
 ## Requisiti
 
@@ -48,7 +48,7 @@ Nell’aggiornamento da 1.0.5 a 1.0.6 l’archivio esistente viene salvato in un
 - [ ] Selezione cartelle e riapertura dello stesso database su macOS.
 - [ ] Creazione di cliente/preventivo e persistenza dopo riavvio.
 - [ ] PDF cliente: dati azienda/cliente, riepilogo, importi e tutti i moduli.
-- [ ] PDF fornitore: solo moduli pertinenti, nessun dato cliente, importo, prezzo o riepilogo economico.
+- [ ] PDF fornitore: tutti i moduli del preventivo, nessun dato cliente, importo, prezzo o riepilogo economico.
 - [ ] Verifica dei due PDF e dei percorsi su Windows 10/11.
 - [ ] Verifica backup/importazione su Windows.
 - [ ] Prova installazione, avvio e disinstallazione del setup su Windows 10/11.

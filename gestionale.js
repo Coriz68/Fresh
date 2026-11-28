@@ -961,14 +961,9 @@ async function shareQuotePdfViaWhatsApp(kind) {
     if (!quote) return;
     let supplierItemIds = null;
     if (kind === 'supplier') {
-      const choices = quote.items.map((item, index) => `${index + 1}. ${modules.find(model => model.id === item.moduleId)?.name || item.moduleId}`).join('\n');
-      const answer = window.prompt(`Seleziona i moduli pertinenti a questo fornitore, indicando i numeri separati da virgola.\n${choices}`) || '';
-      const indexes = answer.split(/[,;\s]+/).filter(Boolean).map(value => Number(value));
-      if (!indexes.length || indexes.some(index => !Number.isInteger(index) || index < 1 || index > quote.items.length) || new Set(indexes).size !== indexes.length) {
-        showToast('Selezione moduli fornitore non valida. PDF non generato.', true);
-        return;
-      }
-      supplierItemIds = indexes.map(index => quote.items[index - 1].id);
+      // Fornitore unico: il PDF fornitore include sempre tutti i moduli del preventivo.
+      supplierItemIds = allSupplierItemIds(quote);
+      if (!supplierItemIds) return;
     }
     const generated = await generateQuotePdf(kind, '', supplierItemIds);
     if (!generated?.path) return;
@@ -993,17 +988,21 @@ async function shareQuotePdfViaWhatsApp(kind) {
   }
 }
 
+function allSupplierItemIds(quote) {
+  const ids = quote.items.map(item => item.id).filter(Boolean);
+  if (!ids.length) {
+    showToast('Aggiungi almeno un modulo al preventivo.', true);
+    return null;
+  }
+  return ids;
+}
+
 async function generateSupplierPdfPreview() {
   const quote = getQuote();
   if (!quote) return;
-  const choices = quote.items.map((item, index) => `${index + 1}. ${modules.find(model => model.id === item.moduleId)?.name || item.moduleId}`).join('\n');
-  const answer = window.prompt(`Seleziona i moduli pertinenti al fornitore, indicando i numeri separati da virgola.\n${choices}`) || '';
-  const indexes = answer.split(/[,;\s]+/).filter(Boolean).map(value => Number(value));
-  if (!indexes.length || indexes.some(index => !Number.isInteger(index) || index < 1 || index > quote.items.length) || new Set(indexes).size !== indexes.length) {
-    showToast('Selezione moduli fornitore non valida. PDF non generato.', true);
-    return;
-  }
-  await generateQuotePdf('supplier', '', indexes.map(index => quote.items[index - 1].id));
+  const supplierItemIds = allSupplierItemIds(quote);
+  if (!supplierItemIds) return;
+  await generateQuotePdf('supplier', '', supplierItemIds);
 }
 
 async function handleWhatsappPdfAction(action) {
@@ -1093,7 +1092,7 @@ async function generateQuotePdf(kind = 'customer', recipient = '', supplierItemI
   let includedItems = quote.items;
   if (kind === 'supplier') {
     if (!Array.isArray(supplierItemIds) || !supplierItemIds.length || supplierItemIds.some(id => !id) || new Set(supplierItemIds).size !== supplierItemIds.length) {
-      throw new Error('Identità dei moduli pertinenti al fornitore non verificabile.');
+      throw new Error('Identità dei moduli del PDF fornitore non verificabile.');
     }
     includedItems = supplierItemIds.map(id => quote.items.find(item => item.id === id));
     if (includedItems.some(item => !item)) throw new Error('La selezione dei moduli non corrisponde al preventivo corrente.');

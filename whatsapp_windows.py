@@ -268,7 +268,7 @@ def copy_pdf_to_clipboard(
         expected: dict[str, Any] = {"quote_id": quote_id, "revision": revision, "kind": kind, "recipient": recipient}
         if kind == "supplier":
             if not module_ids or any(not isinstance(item_id, str) or not item_id for item_id in module_ids) or len(set(module_ids)) != len(module_ids):
-                raise ValueError("Moduli pertinenti del fornitore non verificabili.")
+                raise ValueError("Moduli del PDF fornitore non verificabili.")
             expected["module_ids"] = "|".join(module_ids)
         _verified_receipt(pdf_path, expected, receipt)
         clipboard_reader = clipboard_reader or _clipboard_paths
