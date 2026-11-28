@@ -40,7 +40,7 @@ test('legacy storage and installer identity identifiers stay stable', () => {
   assert.match(installer, /DefaultDirName=\{autopf\}\\Gestionale Preventivi/);
 });
 
-test('upgrade configuration is consistently 1.0.17, preserves install paths, and documents WhatsApp fallback', () => {
+test('upgrade configuration is consistently 1.0.18, preserves install paths, and documents WhatsApp fallback', () => {
   const installer = fs.readFileSync(new URL('../packaging/windows/GestionalePreventivi.iss', `file://${__dirname}/`), 'utf8');
   const versionInfo = fs.readFileSync(new URL('../packaging/windows/version_info.txt', `file://${__dirname}/`), 'utf8');
   const workflow = fs.readFileSync(new URL('../.github/workflows/windows-installer.yml', `file://${__dirname}/`), 'utf8');
@@ -50,14 +50,14 @@ test('upgrade configuration is consistently 1.0.17, preserves install paths, and
     fs.readFileSync(new URL('../Istruzioni_gestionale.txt', `file://${__dirname}/`), 'utf8')
   ];
 
-  assert.match(installer, /AppVersion "1\.0\.17"/);
+  assert.match(installer, /AppVersion "1\.0\.18"/);
   assert.match(installer, /DefaultDirName=\{autopf\}\\Gestionale Preventivi/);
   assert.match(installer, /Flags: ignoreversion/);
-  assert.match(versionInfo, /filevers=\(1, 0, 17, 0\)/);
-  assert.match(versionInfo, /ProductVersion', '1\.0\.17'/);
-  assert.match(workflow, /Gestionale-Preventivi-1\.0\.17-Windows-x64/);
+  assert.match(versionInfo, /filevers=\(1, 0, 18, 0\)/);
+  assert.match(versionInfo, /ProductVersion', '1\.0\.18'/);
+  assert.match(workflow, /Gestionale-Preventivi-1\.0\.18-Windows-x64/);
   assert.match(workflow, /-Filter \*\.html\)\.Count -ne 32/);
-  assert.match(instructions, /Gestionale Preventivi 1\.0\.17 Setup\.exe/);
+  assert.match(instructions, /Gestionale Preventivi 1\.0\.18 Setup\.exe/);
   assert.match(instructions, /whatsapp:\/\/send/);
   assert.match(instructions, /web\.whatsapp\.com\/send/);
   assert.match(instructions, /non preme Invio/);
@@ -70,7 +70,7 @@ test('upgrade configuration is consistently 1.0.17, preserves install paths, and
   assert.match(instructions, /aggiornamento in-place dalla 1\.0\.5/i);
   assert.match(instructions, /non introduce un updater automatico/i);
   assert.match(instructions, /Windows 10\/11/);
-  assert.ok(manuals.every(text => /1\.0\.17/.test(text)));
+  assert.ok(manuals.every(text => /1\.0\.18/.test(text)));
 });
 
 function runPhoneNormalizer(value) {
