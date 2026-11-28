@@ -61,6 +61,13 @@ test('anteprima espone le tre azioni con etichetta Copia PDF dipendente dal tipo
   assert.doesNotMatch(htmlSource, /open-whatsapp-browser/);
 });
 
+test('l’anteprima si apre solo dopo che il PDF è salvato e le azioni sono pronte', () => {
+  const saveIndex = source.indexOf('await desktopBridge.write_pdf(kind,');
+  const previewIndex = source.indexOf('pdfDialog.showModal();', saveIndex);
+  assert.ok(saveIndex >= 0 && previewIndex > saveIndex, 'Il salvataggio verificato deve precedere l’apertura dell’anteprima.');
+  assert.ok(source.indexOf('activeWhatsappPdf = {', saveIndex) < previewIndex, 'Il contesto del PDF deve essere pronto prima che i pulsanti diventino visibili.');
+});
+
 test('Copia PDF usa il documento corrente, verifica il percorso e dà istruzioni Ctrl+V', async () => {
   const { sandbox, calls, instructions } = makeSandbox();
   await sandbox.handle('copy-pdf');

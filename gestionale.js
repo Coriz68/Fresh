@@ -1171,7 +1171,6 @@ async function generateQuotePdf(kind = 'customer', recipient = '', supplierItemI
       document.querySelector('#pdfPreview').src = pdfUrl;
       document.querySelector('#pdfDialogTitle').textContent = kind === 'customer' ? 'Anteprima preventivo cliente' : 'Anteprima moduli fornitore';
       document.querySelector('#pdfDialogEyebrow').textContent = kind === 'customer' ? 'DOCUMENTO CLIENTE' : 'DOCUMENTO FORNITORE';
-      pdfDialog.showModal();
       if (desktopBridge) {
         logDesktopEvent('pdf_disk_save_started');
         showPdfProgress('Salvo il PDF nella cartella configurata…');
@@ -1205,6 +1204,7 @@ async function generateQuotePdf(kind = 'customer', recipient = '', supplierItemI
         document.querySelectorAll('[data-action="open-whatsapp"]').forEach(button => { button.disabled = false; });
         showToast(`Anteprima PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} pronta.`);
       }
+      pdfDialog.showModal();
     } finally {
       if (resumeModuleItemId) {
         const activeItem = quote.items.find(item => item.id === resumeModuleItemId);
