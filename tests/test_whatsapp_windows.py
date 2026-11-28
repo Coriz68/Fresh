@@ -83,7 +83,7 @@ class WhatsAppClipboardTests(unittest.TestCase):
         self.desktop = FakeDesktop([self.window])
         self.addCleanup(self.temp.cleanup)
 
-    def run_attach(self, *, windows=None, composer=True, timeout=0.03, validation_error=None):
+    def run_attach(self, *, windows=None, composer=True, timeout=0.03, validation_error=None, process_name_resolver=None, app_user_model_id_resolver=None):
         if windows is None:
             self.window = FakeWindow(composer=composer)
             self.desktop = FakeDesktop([self.window])
@@ -96,6 +96,8 @@ class WhatsAppClipboardTests(unittest.TestCase):
                 str(self.pdf), "customer", "393331234567", QUOTE_ID, REVISION, [], receipt,
                 timeout=timeout, platform_name="nt",
                 desktop_factory=lambda **kwargs: FakeDesktop(windows),
+                process_name_resolver=process_name_resolver,
+                app_user_model_id_resolver=app_user_model_id_resolver,
                 clipboard_reader=lambda: list(self.clipboard),
                 clipboard_writer=lambda path: (self.writes.append(str(path)), self.clipboard.__setitem__(slice(None), [str(path)])),
                 sequence_reader=lambda: 1,
@@ -122,6 +124,20 @@ class WhatsAppClipboardTests(unittest.TestCase):
                     desktop_factory=lambda **kwargs: FakeDesktop([]),
                 )
 
+    def test_open_whatsapp_recognizes_the_microsoft_store_app_window_identity(self):
+        store_window = FakeWindow()
+        app_id = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"
+        with patch.object(whatsapp, "_shell_execute_protocol", return_value=42):
+            result = whatsapp.open_whatsapp_chat(
+                "393331234567",
+                platform_name="nt",
+                desktop_factory=lambda **kwargs: FakeDesktop([store_window]),
+                process_name_resolver=lambda window: "ApplicationFrameHost.exe",
+                app_user_model_id_resolver=lambda window: app_id,
+            )
+        self.assertEqual(result, {"ok": True})
+        self.assertTrue(store_window.active)
+
     def test_open_whatsapp_reports_missing_protocol_handler(self):
         with patch.object(whatsapp, "_shell_execute_protocol", return_value=31):
             with self.assertRaisesRegex(RuntimeError, "protocollo WhatsApp"):
@@ -142,6 +158,16 @@ class WhatsAppClipboardTests(unittest.TestCase):
         composer = self.window.children[0]
         self.assertEqual(composer.keys, ["^v"])
         self.assertEqual(result["filename"], self.window.filename)
+
+    def test_prepare_pdf_recognizes_the_microsoft_store_app_window_identity(self):
+        app_id = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"
+        with patch.object(whatsapp, "_validate_document", return_value={"sha256": "b" * 64, "size": self.pdf.stat().st_size, "pages": 1}):
+            result = self.run_attach(
+                process_name_resolver=lambda window: "ApplicationFrameHost.exe",
+                app_user_model_id_resolver=lambda window: app_id,
+            )
+        self.assertTrue(result["attached"])
+        self.assertEqual(self.window.children[0].keys, ["^v"])
 
     def test_previous_clipboard_document_is_replaced_by_exact_target(self):
         with patch.object(whatsapp, "_windows_process_name", return_value="whatsapp.exe"):

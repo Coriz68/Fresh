@@ -14,6 +14,8 @@ from typing import Any, Callable
 
 _LOCK = threading.Lock()
 _COMPOSER_NAMES = frozenset({"type a message", "scrivi un messaggio", "digita un messaggio", "message"})
+_WHATSAPP_PROCESS = "whatsapp.exe"
+_WHATSAPP_APP_USER_MODEL_ID = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"
 
 
 def _windows_process_name(process_id: int) -> str:
@@ -34,6 +36,111 @@ def _windows_process_name(process_id: int) -> str:
         return Path(buffer.value).name.casefold()
     finally:
         kernel32.CloseHandle(handle)
+
+
+class _Guid(ctypes.Structure):
+    _fields_ = [
+        ("data1", wintypes.DWORD),
+        ("data2", wintypes.WORD),
+        ("data3", wintypes.WORD),
+        ("data4", wintypes.BYTE * 8),
+    ]
+
+
+class _PropertyKey(ctypes.Structure):
+    _fields_ = [("fmtid", _Guid), ("pid", wintypes.DWORD)]
+
+
+class _PropVariantValue(ctypes.Union):
+    _fields_ = [("pointer", ctypes.c_void_p), ("number", ctypes.c_longlong)]
+
+
+class _PropVariant(ctypes.Structure):
+    _anonymous_ = ("value",)
+    _fields_ = [
+        ("vt", wintypes.WORD),
+        ("reserved1", wintypes.WORD),
+        ("reserved2", wintypes.WORD),
+        ("reserved3", wintypes.WORD),
+        ("value", _PropVariantValue),
+    ]
+
+
+def _guid(value: str) -> _Guid:
+    import uuid
+
+    parsed = uuid.UUID(value)
+    tail = (wintypes.BYTE * 8).from_buffer_copy(parsed.bytes[8:])
+    return _Guid(parsed.time_low, parsed.time_mid, parsed.time_hi_version, tail)
+
+
+def _windows_app_user_model_id(window: Any) -> str:
+    """Read the shell AppUserModelID used by Microsoft Store-hosted windows."""
+    if os.name != "nt":
+        return ""
+    element_info = getattr(window, "element_info", None)
+    handle = int(getattr(element_info, "handle", 0) or getattr(window, "handle", 0) or 0)
+    if not handle:
+        return ""
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    shell32.SHGetPropertyStoreForWindow.argtypes = [
+        wintypes.HWND,
+        ctypes.POINTER(_Guid),
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    shell32.SHGetPropertyStoreForWindow.restype = ctypes.c_long
+    property_store_iid = _guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")
+    property_store = ctypes.c_void_p()
+    result = shell32.SHGetPropertyStoreForWindow(
+        handle, ctypes.byref(property_store_iid), ctypes.byref(property_store)
+    )
+    if result < 0 or not property_store.value:
+        return ""
+
+    key = _PropertyKey(_guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5)
+    variant = _PropVariant()
+    vtable = None
+    try:
+        vtable = ctypes.cast(
+            property_store,
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)),
+        ).contents
+        get_value = ctypes.WINFUNCTYPE(
+            ctypes.c_long,
+            ctypes.c_void_p,
+            ctypes.POINTER(_PropertyKey),
+            ctypes.POINTER(_PropVariant),
+        )(vtable[5])
+        if get_value(property_store, ctypes.byref(key), ctypes.byref(variant)) < 0:
+            return ""
+        return ctypes.wstring_at(variant.pointer) if variant.vt == 31 and variant.pointer else ""
+    except (AttributeError, OSError, TypeError, ValueError):
+        return ""
+    finally:
+        if variant.vt:
+            ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+            ole32.PropVariantClear.argtypes = [ctypes.POINTER(_PropVariant)]
+            ole32.PropVariantClear.restype = ctypes.c_long
+            ole32.PropVariantClear(ctypes.byref(variant))
+        if vtable is not None:
+            release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtable[2])
+            release(property_store)
+
+
+def _is_whatsapp_window(
+    window: Any,
+    process_name_resolver: Callable[[Any], str],
+    app_user_model_id_resolver: Callable[[Any], str],
+) -> bool:
+    try:
+        if process_name_resolver(window).casefold() == _WHATSAPP_PROCESS:
+            return True
+    except Exception:
+        pass
+    try:
+        return app_user_model_id_resolver(window).casefold() == _WHATSAPP_APP_USER_MODEL_ID.casefold()
+    except Exception:
+        return False
 
 
 def _clipboard_paths() -> list[str]:
@@ -231,7 +338,15 @@ def _shell_execute_protocol(uri: str) -> int:
     return int(result or 0)
 
 
-def open_whatsapp_chat(phone: str, *, platform_name: str | None = None, timeout: float = 20, desktop_factory: Callable[..., Any] | None = None) -> dict[str, bool]:
+def open_whatsapp_chat(
+    phone: str,
+    *,
+    platform_name: str | None = None,
+    timeout: float = 20,
+    desktop_factory: Callable[..., Any] | None = None,
+    process_name_resolver: Callable[[Any], str] | None = None,
+    app_user_model_id_resolver: Callable[[Any], str] | None = None,
+) -> dict[str, bool]:
     if (platform_name or os.name) != "nt":
         raise RuntimeError("WhatsApp Desktop è disponibile solo su Windows.")
     if not phone.isdigit() or not 8 <= len(phone) <= 15:
@@ -250,11 +365,16 @@ def open_whatsapp_chat(phone: str, *, platform_name: str | None = None, timeout:
             raise RuntimeError("UI Automation non disponibile per verificare l’avvio di WhatsApp Desktop.") from error
         desktop_factory = Desktop
     desktop = desktop_factory(backend="uia")
+    process_name_resolver = process_name_resolver or (
+        lambda window: _windows_process_name(window.element_info.process)
+    )
+    app_user_model_id_resolver = app_user_model_id_resolver or _windows_app_user_model_id
 
     def visible_whatsapp_window():
         matches = [
             window for window in desktop.windows()
-            if window.is_visible() and _windows_process_name(window.element_info.process) == "whatsapp.exe"
+            if window.is_visible()
+            and _is_whatsapp_window(window, process_name_resolver, app_user_model_id_resolver)
         ]
         if len(matches) > 1:
             raise RuntimeError("Sono aperte più finestre WhatsApp; verifica dell’avvio interrotta.")
@@ -308,7 +428,24 @@ def copy_pdf_to_clipboard(path: str, kind: str, phone: str, quote_id: str, revis
     return {"clipboardReady": True, "path": str(pdf_path), "kind": kind}
 
 
-def prepare_whatsapp_pdf(path: str, kind: str, phone: str, quote_id: str, revision: str, module_ids: list[str] | None = None, receipt: dict[str, Any] | None = None, *, timeout: float = 20, platform_name: str | None = None, desktop_factory: Callable[..., Any] | None = None, clipboard_reader: Callable[[], list[str]] | None = None, clipboard_writer: Callable[[Path], None] | None = None, sequence_reader: Callable[[], int] | None = None) -> dict[str, Any]:
+def prepare_whatsapp_pdf(
+    path: str,
+    kind: str,
+    phone: str,
+    quote_id: str,
+    revision: str,
+    module_ids: list[str] | None = None,
+    receipt: dict[str, Any] | None = None,
+    *,
+    timeout: float = 20,
+    platform_name: str | None = None,
+    desktop_factory: Callable[..., Any] | None = None,
+    clipboard_reader: Callable[[], list[str]] | None = None,
+    clipboard_writer: Callable[[Path], None] | None = None,
+    sequence_reader: Callable[[], int] | None = None,
+    process_name_resolver: Callable[[Any], str] | None = None,
+    app_user_model_id_resolver: Callable[[Any], str] | None = None,
+) -> dict[str, Any]:
     """Paste one verified PDF into the already-open, operator-verified recipient chat."""
     if (platform_name or os.name) != "nt":
         raise RuntimeError("La preparazione WhatsApp è disponibile solo su Windows.")
@@ -332,6 +469,10 @@ def prepare_whatsapp_pdf(path: str, kind: str, phone: str, quote_id: str, revisi
         except ImportError as error:
             raise RuntimeError("Automazione UI Windows non disponibile in questa installazione.") from error
         desktop_factory = Desktop
+    process_name_resolver = process_name_resolver or (
+        lambda window: _windows_process_name(window.element_info.process)
+    )
+    app_user_model_id_resolver = app_user_model_id_resolver or _windows_app_user_model_id
 
     with _LOCK:
         # Preserve the known-working CF_HDROP when it already names this exact file.
@@ -346,9 +487,12 @@ def prepare_whatsapp_pdf(path: str, kind: str, phone: str, quote_id: str, revisi
 
         try:
             desktop = desktop_factory(backend="uia")
-            resolver = lambda window: _windows_process_name(window.element_info.process)
             def unique_whatsapp_window() -> Any | None:
-                matches = [w for w in desktop.windows() if w.is_visible() and resolver(w) == "whatsapp.exe"]
+                matches = [
+                    window for window in desktop.windows()
+                    if window.is_visible()
+                    and _is_whatsapp_window(window, process_name_resolver, app_user_model_id_resolver)
+                ]
                 if len(matches) > 1:
                     raise RuntimeError("Sono aperte più finestre WhatsApp; allegato annullato.")
                 return matches[0] if matches else None

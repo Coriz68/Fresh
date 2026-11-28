@@ -34,7 +34,7 @@ function makeSandbox(pdfByKind, revealError = null) {
         return { attached: true, filename };
       }
     },
-    window: { confirm: () => true, prompt: (() => { let count = 0; return () => ++count === 1 ? '3337654321' : '1'; })() },
+    window: { confirm: () => true, alert: message => calls.push(`alert:${message}`), prompt: (() => { let count = 0; return () => ++count === 1 ? '3337654321' : '1'; })() },
     modules: [{ id: 'tenda', name: 'Tenda da sole' }],
     document: { querySelector: selector => selector === '#pdfShareInstructions' ? shareInstructions : null },
     showToast: message => calls.push(`toast:${message}`),
@@ -123,6 +123,7 @@ test('se WhatsApp non si apre copia solo il PDF verificato e mostra la stringa C
   await sandbox.share('customer');
   assert.ok(calls.some(call => call.startsWith('toast:PDF CLIENTE pronto. Premi Ctrl+V nella chat WhatsApp per allegarlo')));
   assert.equal(shareInstructions.textContent, 'PDF CLIENTE pronto. Premi Ctrl+V nella chat WhatsApp per allegarlo. WhatsApp chiuso');
+  assert.ok(calls.some(call => call.startsWith('alert:PDF CLIENTE pronto. Premi Ctrl+V nella chat WhatsApp per allegarlo.\n\nDettaglio: WhatsApp chiuso')));
 });
 
 test('i pulsanti cliente e fornitore restano separati e l’invio resta manuale', () => {

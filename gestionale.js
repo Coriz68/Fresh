@@ -948,6 +948,7 @@ async function shareQuotePdfViaWhatsApp(kind) {
       const manual = `PDF ${label} pronto. Premi Ctrl+V nella chat WhatsApp per allegarlo`;
       setPdfShareInstructions(`${manual}. ${openError.message}`);
       showToast(manual, true);
+      window.alert(`${manual}.\n\nDettaglio: ${openError.message}`);
       return;
     }
     if (!window.confirm(`WhatsApp è stato aperto per ${phone}. Verifica il destinatario visibile nella chat e conferma solo se è corretto. Il messaggio non verrà inviato.`)) {
