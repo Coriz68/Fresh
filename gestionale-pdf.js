@@ -35,13 +35,35 @@ window.buildQuotePdfDocument = async function (payload, modulePdfs) {
     const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
     logo = header.includes('image/png') ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
   }
-  const companyAddress = [company.address, company.postalCode, company.city, provinceLabel(company.province)].filter(Boolean).join(' ');
-  const companyDetails = [company.vatNumber ? `P. IVA ${company.vatNumber}` : '', company.taxCode ? `C.F. ${company.taxCode}` : '', company.phone, company.email, company.website].filter(Boolean).join(' · ');
-  const clientAddress = [client.address, client.postalCode, client.city, provinceLabel(client.province)].filter(Boolean).join(' ');
-  const clientDetails = [client.vatNumber ? `P. IVA ${client.vatNumber}` : '', client.taxCode ? `C.F. ${client.taxCode}` : '', client.email, client.phone].filter(Boolean).join(' · ');
-  const drawTopText = (page, text, x, top, size, font = regular, fill = ink, maxWidth = 740) => {
-    const safeText = fitPdfText(text, font, size, maxWidth);
-    page.drawText(safeText, { x, y: height - top - size, size, font, color: fill });
+  const text = color(0.2, 0.26, 0.32);
+  const rule = color(0.84, 0.88, 0.89);
+  const companyStreet = [company.address].filter(Boolean).join('');
+  const companyTown = [company.postalCode, company.city, provinceLabel(company.province)].filter(Boolean).join(' ');
+  const companyLines = [
+    [companyStreet, companyTown].filter(Boolean).join(' - '),
+    [company.vatNumber ? `P. IVA ${company.vatNumber}` : '', company.taxCode ? `C.F. ${company.taxCode}` : ''].filter(Boolean).join('   '),
+    [company.phone ? `Tel. ${company.phone}` : '', company.email].filter(Boolean).join('   '),
+    company.website || ''
+  ].filter(Boolean);
+  const clientName = client.name || client.company || '';
+  const clientSecondName = client.company && client.name ? client.company : '';
+  const clientAddressLines = [
+    client.address || '',
+    [client.postalCode, client.city, provinceLabel(client.province)].filter(Boolean).join(' ')
+  ].filter(Boolean);
+  const clientFiscal = [client.vatNumber ? `P. IVA ${client.vatNumber}` : '', client.taxCode ? `C.F. ${client.taxCode}` : ''].filter(Boolean);
+  const clientContacts = [client.phone ? `Tel. ${client.phone}` : '', client.email || ''].filter(Boolean);
+  const drawTopText = (page, value, x, top, size, font = regular, fill = ink, maxWidth = 740) => {
+    const safeText = fitPdfText(value, font, size, maxWidth);
+    if (safeText) page.drawText(safeText, { x, y: height - top - size, size, font, color: fill });
+    return safeText;
+  };
+  const drawRightText = (page, value, right, top, size, font = regular, fill = ink, maxWidth = 200) => {
+    const safeText = fitPdfText(value, font, size, maxWidth);
+    if (!safeText) return safeText;
+    const textWidth = font.widthOfTextAtSize(safeText, size);
+    page.drawText(safeText, { x: right - textWidth, y: height - top - size, size, font, color: fill });
+    return safeText;
   };
   const drawLine = (page, x1, top, x2, stroke = color(0.87, 0.9, 0.92), thickness = 0.7) => {
     page.drawLine({ start: { x: x1, y: height - top }, end: { x: x2, y: height - top }, thickness, color: stroke });
@@ -49,82 +71,110 @@ window.buildQuotePdfDocument = async function (payload, modulePdfs) {
   const drawTopRect = (page, x, top, rectWidth, rectHeight, fill) => {
     page.drawRectangle({ x, y: height - top - rectHeight, width: rectWidth, height: rectHeight, color: fill });
   };
+  const drawLabel = (page, value, x, top) => drawTopText(page, value, x, top, 7, bold, muted, 200);
+  // Colonne del riepilogo: importi allineati a destra per una lettura immediata.
+  const columns = { article: 46, quantity: 470, price: 590, discount: 660, net: 795 };
 
   for (let pageIndex = 0; pageIndex < summaryPages; pageIndex++) {
     const page = pdf.addPage([width, height]);
     const first = pageIndex === 0;
     drawTopRect(page, 36, 12, width - 72, 4, accent);
+
+    // Intestazione: fascia unica alta quanto il logo, con dati aziendali centrati e riquadro preventivo allineato.
+    const bandTop = 24;
+    const bandHeight = 104;
+    let companyX = 36;
     if (logo) {
-      const maxLogoWidth = 260;
-      const maxLogoHeight = 108;
-      const scale = Math.min(maxLogoWidth / logo.width, maxLogoHeight / logo.height, 5.5);
+      const maxLogoWidth = 230;
+      const scale = Math.min(maxLogoWidth / logo.width, bandHeight / logo.height, 5.5);
       const logoHeight = logo.height * scale;
       const logoWidth = logo.width * scale;
-      const logoColumnWidth = 260;
-      const logoX = 36 + Math.max(0, (logoColumnWidth - logoWidth) / 2);
-      const logoY = height - 18 - logoHeight;
-      page.drawImage(logo, { x: logoX, y: logoY, width: logoWidth, height: logoHeight });
+      page.drawImage(logo, { x: 36, y: height - bandTop - logoHeight - (bandHeight - logoHeight) / 2, width: logoWidth, height: logoHeight });
+      companyX = 36 + Math.max(logoWidth, 120) + 24;
+      page.drawLine({ start: { x: companyX - 12, y: height - bandTop - 8 }, end: { x: companyX - 12, y: height - bandTop - bandHeight + 8 }, thickness: 0.6, color: rule });
     }
-    const companyX = logo ? 318 : 36;
-    drawTopText(page, company.name || 'Azienda', companyX, 31, 16, bold, teal, 275);
-    drawTopText(page, companyAddress, companyX, 54, 8, regular, muted, 275);
-    drawTopText(page, companyDetails, companyX, 68, 8, regular, muted, 275);
-    drawTopRect(page, 610, 23, 195, 74, teal);
-    drawTopRect(page, 610, 23, 4, 74, accent);
-    drawTopText(page, 'PREVENTIVO', 626, 31, 8, bold, white, 165);
-    drawTopText(page, quote.number, 626, 47, 14, bold, white, 165);
-    drawTopText(page, dateLabel(quote.createdAt), 626, 71, 8, regular, color(0.82, 0.91, 0.89), 165);
-    drawLine(page, 36, 128, width - 36, color(0.83, 0.88, 0.88), 0.8);
+    const companyWidth = 594 - companyX;
+    const companyBlockHeight = 22 + companyLines.length * 14;
+    const companyTop = bandTop + Math.max(0, (bandHeight - companyBlockHeight) / 2);
+    drawTopText(page, company.name || 'Azienda', companyX, companyTop, 17, bold, teal, companyWidth);
+    companyLines.forEach((line, index) => drawTopText(page, line, companyX, companyTop + 25 + index * 14, 9, regular, text, companyWidth));
+
+    drawTopRect(page, 610, bandTop, 195, bandHeight, teal);
+    drawTopRect(page, 610, bandTop, 4, bandHeight, accent);
+    drawTopText(page, 'PREVENTIVO', 628, bandTop + 16, 8, bold, color(0.8, 0.9, 0.88), 165);
+    drawTopText(page, quote.number, 628, bandTop + 31, 15, bold, white, 165);
+    drawLine(page, 628, bandTop + 58, 789, color(0.3, 0.52, 0.5), 0.6);
+    drawTopText(page, 'Data', 628, bandTop + 66, 8, regular, color(0.8, 0.9, 0.88), 70);
+    drawRightText(page, dateLabel(quote.createdAt), 789, bandTop + 66, 9, bold, white, 100);
+    drawTopText(page, 'Validità', 628, bandTop + 82, 8, regular, color(0.8, 0.9, 0.88), 70);
+    drawRightText(page, `${quote.validityDays || 30} giorni`, 789, bandTop + 82, 9, bold, white, 100);
+    drawLine(page, 36, 140, width - 36, color(0.83, 0.88, 0.88), 0.8);
+
     if (first) {
-      drawTopRect(page, 36, 140, width - 72, 55, pale);
-      drawTopText(page, 'CLIENTE', 50, 147, 8, bold, muted, 400);
-      drawTopText(page, client.name || client.company, 50, 160, 12, bold, ink, 485);
-      const clientSubline = [
-        client.company && client.name ? client.company : '', clientAddress, clientDetails
-      ].filter(Boolean).join(' · ');
-      drawTopText(page, clientSubline, 50, 178, 7, regular, muted, 730);
-      drawTopText(page, 'VALIDITÀ', 622, 147, 8, bold, muted, 155);
-      drawTopText(page, `${quote.validityDays || 30} giorni`, 622, 161, 11, bold, teal, 155);
+      // Dati cliente in colonne leggibili invece di un'unica riga compressa.
+      const panelTop = 152;
+      const panelHeight = 72;
+      drawTopRect(page, 36, panelTop, width - 72, panelHeight, pale);
+      drawTopRect(page, 36, panelTop, 3, panelHeight, accent);
+      drawLabel(page, 'SPETT.LE CLIENTE', 52, panelTop + 11);
+      drawTopText(page, clientName, 52, panelTop + 24, 13, bold, ink, 250);
+      if (clientSecondName) drawTopText(page, clientSecondName, 52, panelTop + 43, 9, regular, text, 250);
+      drawLabel(page, 'INDIRIZZO', 330, panelTop + 11);
+      [...clientAddressLines, ...clientFiscal].slice(0, 3)
+        .forEach((line, index) => drawTopText(page, line, 330, panelTop + 25 + index * 13, 9, regular, text, 225));
+      drawLabel(page, 'CONTATTI', 575, panelTop + 11);
+      clientContacts.slice(0, 2)
+        .forEach((line, index) => drawTopText(page, line, 575, panelTop + 25 + index * 13, 9, regular, text, 220));
     } else {
-      drawTopText(page, `CLIENTE: ${client.name || client.company}`, 36, 106, 9, bold, ink, 525);
+      drawTopText(page, `CLIENTE: ${clientName}`, 36, 150, 9, bold, ink, 525);
     }
-    const titleTop = first ? 210 : 137;
+
+    const titleTop = first ? 238 : 168;
     drawTopText(page, 'RIEPILOGO ARTICOLI', 36, titleTop, 10, bold, teal, 750);
-    const headTop = titleTop + 17;
-    drawTopRect(page, 36, headTop, width - 72, 24, teal);
-    drawTopText(page, 'ARTICOLO / CONFIGURAZIONE', 44, headTop + 7, 7, bold, white, 330);
-    drawTopText(page, 'Q.TÀ', 434, headTop + 7, 7, bold, white, 35);
-    drawTopText(page, 'LISTINO', 485, headTop + 7, 7, bold, white, 60);
-    drawTopText(page, 'SCONTO', 578, headTop + 7, 7, bold, white, 55);
-    drawTopText(page, 'NETTO', 674, headTop + 7, 7, bold, white, 90);
+    const headTop = titleTop + 16;
+    drawTopRect(page, 36, headTop, width - 72, 22, teal);
+    drawTopText(page, 'ARTICOLO / CONFIGURAZIONE', columns.article, headTop + 7, 7, bold, white, 330);
+    drawRightText(page, 'Q.TÀ', columns.quantity, headTop + 7, 7, bold, white);
+    drawRightText(page, 'LISTINO', columns.price, headTop + 7, 7, bold, white);
+    drawRightText(page, 'SCONTO', columns.discount, headTop + 7, 7, bold, white);
+    drawRightText(page, 'NETTO', columns.net, headTop + 7, 7, bold, white);
     const start = pageIndex * rowsPerPage;
     const pageRows = rows.slice(start, start + rowsPerPage);
-    const rowStart = headTop + 30;
+    const rowStart = headTop + 28;
     pageRows.forEach((row, rowIndex) => {
       const top = rowStart + rowIndex * 21;
-      if (rowIndex % 2 === 0) drawTopRect(page, 36, top - 3, width - 72, 21, light);
-      drawTopText(page, row.name, 44, top + 2, 8, regular, ink, 365);
-      drawTopText(page, String(row.item.quantity || 1), 434, top + 2, 8, regular, ink, 35);
-      drawTopText(page, money(row.item.price), 485, top + 2, 8, regular, ink, 75);
-      drawTopText(page, `${Number(row.item.discount) || 0}%`, 578, top + 2, 8, regular, ink, 55);
-      drawTopText(page, money(row.totals.netTotal), 674, top + 2, 8, bold, ink, 90);
-      drawLine(page, 42, top + 18, width - 42, color(0.9, 0.93, 0.93), 0.45);
+      if (rowIndex % 2 === 0) drawTopRect(page, 36, top - 4, width - 72, 21, light);
+      drawTopText(page, row.name, columns.article, top + 2, 9, regular, ink, 380);
+      drawRightText(page, String(row.item.quantity || 1), columns.quantity, top + 2, 9, regular, ink, 40);
+      drawRightText(page, money(row.item.price), columns.price, top + 2, 9, regular, ink, 100);
+      drawRightText(page, `${Number(row.item.discount) || 0}%`, columns.discount, top + 2, 9, regular, ink, 60);
+      drawRightText(page, money(row.totals.netTotal), columns.net, top + 2, 9, bold, ink, 110);
+      drawLine(page, 36, top + 17, width - 36, color(0.9, 0.93, 0.93), 0.45);
     });
     if (pageIndex === summaryPages - 1) {
-      const totalsTop = rowStart + pageRows.length * 21 + 5;
-      const totalX = 554;
-      drawTopRect(page, totalX, totalsTop, 251, 94, pale);
-      drawTopText(page, `Totale listino: ${money(totals.listTotal)}`, totalX + 12, totalsTop + 8, 8, regular, muted, 227);
-      drawTopText(page, `Sconti applicati: - ${money(totals.discountTotal)}`, totalX + 12, totalsTop + 22, 8, regular, muted, 227);
-      drawLine(page, totalX + 12, totalsTop + 38, width - 48, color(0.82, 0.88, 0.87));
-      drawTopText(page, `Netto (IVA esclusa): ${money(totals.netTotal)}`, totalX + 12, totalsTop + 44, 8, bold, teal, 227);
-      drawTopText(page, `IVA ${totals.vatRate}%: ${money(totals.vatTotal)}`, totalX + 12, totalsTop + 59, 8, regular, muted, 227);
-      drawTopText(page, `TOTALE: ${money(totals.grossTotal)}`, totalX + 12, totalsTop + 74, 12, bold, teal, 227);
-      if (quote.notes) drawTopText(page, `NOTE: ${quote.notes}`, 36, totalsTop + 9, 7, regular, muted, 490);
+      const totalsTop = rowStart + pageRows.length * 21 + 4;
+      const totalX = 565;
+      const valueRight = width - 48;
+      drawTopRect(page, totalX, totalsTop, width - 36 - totalX, 92, pale);
+      const totalLine = (label, value, top, font = regular, fill = text, size = 9) => {
+        drawTopText(page, label, totalX + 12, top, size, font, fill, 120);
+        drawRightText(page, value, valueRight, top, size, font, fill, 110);
+      };
+      totalLine('Totale listino', money(totals.listTotal), totalsTop + 9);
+      totalLine('Sconti applicati', `- ${money(totals.discountTotal)}`, totalsTop + 23);
+      drawLine(page, totalX + 12, totalsTop + 38, valueRight, color(0.82, 0.88, 0.87));
+      totalLine('Imponibile', money(totals.netTotal), totalsTop + 44, bold, teal);
+      totalLine(`IVA ${totals.vatRate}%`, money(totals.vatTotal), totalsTop + 58);
+      drawTopRect(page, totalX, totalsTop + 72, width - 36 - totalX, 20, teal);
+      totalLine('TOTALE', money(totals.grossTotal), totalsTop + 77, bold, white, 10);
+      if (quote.notes) {
+        drawLabel(page, 'NOTE', 36, totalsTop + 9);
+        drawTopText(page, quote.notes, 36, totalsTop + 21, 8, regular, text, 500);
+      }
     }
     drawLine(page, 36, 566, width - 36);
-    drawTopText(page, company.footerNotes || company.name, 36, 573, 7, regular, muted, 680);
-    drawTopText(page, `RIEPILOGO ${pageIndex + 1}/${summaryPages}`, 713, 573, 7, bold, muted, 92);
+    drawTopText(page, company.footerNotes || company.name, 36, 573, 7, regular, muted, 660);
+    drawRightText(page, `Pagina ${pageIndex + 1} di ${summaryPages}`, width - 36, 573, 7, bold, muted, 100);
   }
 
   for (const moduleBytes of modulePdfs) {
@@ -185,7 +235,7 @@ function fitPdfText(text, font, size, maxWidth) {
 }
 
 function money(value) {
-  return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(value) || 0);
+  return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', useGrouping: 'always' }).format(Number(value) || 0);
 }
 
 function dateLabel(value) {

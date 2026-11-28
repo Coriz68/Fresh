@@ -84,7 +84,7 @@ jobs:
           Copy-Item "docs/INSTALLAZIONE_WINDOWS.md" "dist-installer/ISTRUZIONI.txt"
 
       - name: Carica installer e hash
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: Gestionale-Preventivi-1.0.17-Windows-x64
           path: dist-installer/*

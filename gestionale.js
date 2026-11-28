@@ -61,7 +61,7 @@ function esc(value) {
 }
 
 function money(value) {
-  return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(value) || 0);
+  return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', useGrouping: 'always' }).format(Number(value) || 0);
 }
 
 function dateLabel(value) {

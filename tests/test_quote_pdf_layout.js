@@ -92,7 +92,7 @@ test('PDF cliente: il logo Fresh è più grande e il riepilogo usa una gerarchia
   assert.ok(page.rectangleCalls.some(rect => rect.color.r < 0.2 && rect.color.g > 0.35), 'Il numero preventivo deve avere un riquadro di evidenza verde petrolio.');
   assert.ok(page.rectangleCalls.some(rect => rect.color.r > 0.9 && rect.color.g > 0.93), 'Il riepilogo deve distinguere le righe con fondi leggeri.');
   assert.ok(page.drawTextCalls.some(call => call.text === 'PREV-2026-0042'), 'Il riferimento preventivo deve rimanere ben visibile.');
-  assert.ok(page.drawTextCalls.some(call => call.text === 'TOTALE: 2.745,00 €' || call.text === 'TOTALE: 2745,00 €'), 'Il totale IVA inclusa deve rimanere presente.');
+  assert.ok(page.drawTextCalls.some(call => call.text === 'TOTALE') && page.drawTextCalls.some(call => /^2\.745,00\s€$/.test(call.text)), 'Il totale IVA inclusa deve rimanere presente.');
 });
 
 test('PDF cliente: riepiloghi lunghi proseguono su più pagine mantenendo riferimento e totale', async () => {
@@ -108,7 +108,7 @@ test('PDF cliente: riepiloghi lunghi proseguono su più pagine mantenendo riferi
   assert.equal(pages.length, 2, 'Dieci righe devono essere distribuite su due pagine di riepilogo.');
   assert.ok(pages[1].drawTextCalls.some(call => call.text === 'CLIENTE: Cliente Demo'));
   assert.ok(pages[1].drawTextCalls.some(call => call.text === 'PREV-2026-0042'));
-  assert.ok(pages[1].drawTextCalls.some(call => call.text.startsWith('TOTALE:')));
+  assert.ok(pages[1].drawTextCalls.some(call => call.text === 'TOTALE'));
 });
 
 test('PDF cliente: accorcia note molto lunghe con un numero limitato di misurazioni', async () => {
@@ -130,7 +130,7 @@ test('PDF cliente: normalizza note multilinea e rimuove caratteri di controllo',
 
   await window.buildQuotePdfDocument(multilineQuote, []);
 
-  assert.ok(pages[0].drawTextCalls.some(call => call.text === 'NOTE: Prima riga Seconda riga tabulatoC1'));
+  assert.ok(pages[0].drawTextCalls.some(call => call.text === 'Prima riga Seconda riga tabulatoC1'));
 });
 
 test('PDF cliente: una nota di un milione di caratteri viene accorciata rapidamente', async () => {
@@ -142,7 +142,7 @@ test('PDF cliente: una nota di un milione di caratteri viene accorciata rapidame
   await harness.window.buildQuotePdfDocument(hugeQuote, []);
 
   assert.ok(harness.getTextMeasureCalls() < 100, `Le misurazioni devono restare sotto 100, attuali: ${harness.getTextMeasureCalls()}.`);
-  assert.ok(harness.pages[0].drawTextCalls.some(call => call.text.startsWith('NOTE: X') && call.text.endsWith('...')));
+  assert.ok(harness.pages[0].drawTextCalls.some(call => call.text.startsWith('XXX') && call.text.endsWith('...')));
 });
 
 test('PDF fornitore: esclude dati cliente e associa identificativo, revisione e tipologia', async () => {
@@ -171,4 +171,20 @@ test('PDF cliente: la provincia già tra parentesi non viene raddoppiata', async
   assert.ok(texts.some(text => text.includes('Loreto (AN)')));
   assert.ok(texts.every(text => !text.includes('((')), 'Nessuna parentesi doppia nel PDF.');
   assert.ok(texts.some(text => text.includes('Loreto (MC)')));
+});
+
+test('PDF cliente: intestazione con dati aziendali e cliente completi, leggibili e non tagliati', async () => {
+  const { window, pages } = makePdfHarness();
+  const quote = structuredClone(payload);
+  quote.company.email = 'mircofresh.coperture@gmail.com';
+  quote.company.taxCode = 'NBLMRC78D41E690I';
+
+  await window.buildQuotePdfDocument(quote, []);
+
+  const calls = pages[0].drawTextCalls;
+  for (const expected of ['mircofresh.coperture@gmail.com', 'NBLMRC78D41E690I', 'fresh.example', 'Via Verdi 5', 'cliente@example.it', 'Cliente S.r.l.']) {
+    assert.ok(calls.some(call => call.text.includes(expected)), `Manca nell'intestazione: ${expected}`);
+  }
+  assert.ok(calls.every(call => !call.text.endsWith('...')), 'Nessun dato dell’intestazione deve essere troncato.');
+  assert.ok(calls.filter(call => call.text.includes('@')).every(call => call.size >= 9), 'Contatti scritti ad almeno 9 pt.');
 });
