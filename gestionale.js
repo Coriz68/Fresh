@@ -31,6 +31,8 @@ let pdfUrl = '';
 let generatedPdfBytes = null;
 let generatedPdfKind = 'customer';
 let pdfGenerationActive = false;
+let whatsappShareActive = false;
+let activeWhatsappPdf = null;
 
 const emptyState = () => ({
   clients: [],
@@ -904,73 +906,108 @@ function setPdfShareInstructions(message) {
 }
 
 async function shareQuotePdfViaWhatsApp(kind) {
-  if (!desktopBridge?.prepare_whatsapp_pdf || !desktopBridge?.open_whatsapp_chat) {
+  if (!desktopBridge?.share_whatsapp_pdf) {
     showToast('La condivisione WhatsApp è disponibile nella finestra desktop.', true);
     return;
   }
   if (!['customer', 'supplier'].includes(kind)) return;
-  const quote = getQuote();
-  if (!quote) return;
-  const client = activeClient(quote);
-  let phone = '';
-  if (kind === 'customer') phone = normalizePhoneNumber(client?.phone || '').value.replace(/\D/g, '');
-  else phone = normalizePhoneNumber(window.prompt('Inserisci il numero WhatsApp del fornitore, con prefisso internazionale:') || '').value.replace(/\D/g, '');
-  if (!phone) {
-    showToast(`Numero WhatsApp ${kind === 'customer' ? 'cliente' : 'fornitore'} mancante o non valido.`, true);
+  if (whatsappShareActive) {
+    showToast('Preparazione WhatsApp già in corso. Attendi il completamento.', true);
     return;
   }
-  let supplierItemIds = null;
-  if (kind === 'supplier') {
-    const choices = quote.items.map((item, index) => `${index + 1}. ${modules.find(model => model.id === item.moduleId)?.name || item.moduleId}`).join('\n');
-    const answer = window.prompt(`Seleziona i moduli pertinenti a questo fornitore, indicando i numeri separati da virgola.\n${choices}`) || '';
-    const indexes = answer.split(/[,;\s]+/).filter(Boolean).map(value => Number(value));
-    if (!indexes.length || indexes.some(index => !Number.isInteger(index) || index < 1 || index > quote.items.length) || new Set(indexes).size !== indexes.length) {
-      showToast('Selezione moduli fornitore non valida. PDF non generato.', true);
+  whatsappShareActive = true;
+  document.querySelectorAll?.('[data-action="share-pdf-whatsapp"]').forEach(button => { button.disabled = true; });
+  const actions = document.querySelector('#pdfShareActions');
+  if (actions) actions.hidden = false;
+  activeWhatsappPdf = null;
+  actions?.querySelectorAll('button').forEach(button => { button.disabled = true; });
+  try {
+    const quote = getQuote();
+    if (!quote) return;
+    const client = activeClient(quote);
+    let phoneInput = client?.phone || '';
+    if (kind === 'supplier') phoneInput = window.prompt('Inserisci il numero WhatsApp del fornitore, con prefisso internazionale:') || '';
+    const normalizedPhone = normalizePhoneNumber(phoneInput);
+    if (normalizedPhone.empty || !normalizedPhone.valid) {
+      showToast(`Numero WhatsApp ${kind === 'customer' ? 'cliente' : 'fornitore'} mancante o non valido.`, true);
+      setPdfShareInstructions(`Numero WhatsApp ${kind === 'customer' ? 'cliente' : 'fornitore'} mancante o non valido. Correggilo prima di preparare il PDF.`);
       return;
     }
-    supplierItemIds = indexes.map(index => quote.items[index - 1].id);
-  }
-  let generated = null;
-  try {
-    generated = await generateQuotePdf(kind, phone, supplierItemIds);
+    const phone = normalizedPhone.value.replace(/\D/g, '');
+    let supplierItemIds = null;
+    if (kind === 'supplier') {
+      const choices = quote.items.map((item, index) => `${index + 1}. ${modules.find(model => model.id === item.moduleId)?.name || item.moduleId}`).join('\n');
+      const answer = window.prompt(`Seleziona i moduli pertinenti a questo fornitore, indicando i numeri separati da virgola.\n${choices}`) || '';
+      const indexes = answer.split(/[,;\s]+/).filter(Boolean).map(value => Number(value));
+      if (!indexes.length || indexes.some(index => !Number.isInteger(index) || index < 1 || index > quote.items.length) || new Set(indexes).size !== indexes.length) {
+        showToast('Selezione moduli fornitore non valida. PDF non generato.', true);
+        return;
+      }
+      supplierItemIds = indexes.map(index => quote.items[index - 1].id);
+    }
+    const generated = await generateQuotePdf(kind, phone, supplierItemIds);
     if (!generated?.path) return;
     if (!generated.receipt || generated.receipt.path !== generated.path || generated.receipt.sha256?.length !== 64) throw new Error('Ricevuta di integrità PDF non disponibile. Operazione interrotta.');
     if (await quoteRevision(JSON.stringify(getQuote())) !== generated.revision) throw new Error('Il preventivo è cambiato dopo la generazione del PDF. Rigenera il documento.');
-    const filename = generated.path.split(/[\\/]/).pop();
+    const message = `Buongiorno, condivido il PDF del preventivo ${quote.number}.`;
+    activeWhatsappPdf = { kind, path: generated.path, phone, quoteId: quote.id, revision: generated.revision, moduleIds: generated.moduleIds || [], receipt: generated.receipt, message };
+    actions?.querySelectorAll('[data-action="open-whatsapp"], [data-action="open-whatsapp-browser"], [data-action="open-pdf-folder"]').forEach(button => { button.disabled = false; });
+    if (/Mac|iPhone|iPad/i.test(String(window.navigator?.platform || ''))) {
+      await desktopBridge.open_whatsapp_browser(phone, message);
+      const macMessage = `PDF ${kind === 'customer' ? 'CLIENTE' : 'FORNITORE'} pronto per l'invio. Apri la chat nel browser e allega il PDF dalla cartella selezionata.`;
+      setPdfShareInstructions(macMessage);
+      showToast(macMessage);
+      return;
+    }
+    const result = await desktopBridge.share_whatsapp_pdf(kind, generated.path, phone, quote.id, generated.revision, generated.moduleIds || [], generated.receipt, message);
+    if (result?.clipboardReady !== true || result.path !== generated.path) throw new Error('Il PDF corretto non è verificabile negli appunti. Operazione interrotta.');
+    if (await quoteRevision(JSON.stringify(getQuote())) !== generated.revision) throw new Error('Il preventivo è cambiato durante la preparazione. Rigenera il PDF.');
     const label = kind === 'customer' ? 'CLIENTE' : 'FORNITORE';
-    const instructions = `PDF ${label} pronto. Verifica che WhatsApp abbia aperto la chat del destinatario corretto e conferma per preparare l’allegato.`;
-    setPdfShareInstructions(instructions);
-    try {
-      await desktopBridge.open_whatsapp_chat(phone);
-    } catch (openError) {
-      const copied = await desktopBridge.copy_whatsapp_pdf_clipboard(kind, generated.path, phone, quote.id, generated.revision, generated.moduleIds || [], generated.receipt);
-      if (copied?.clipboardReady !== true || copied.path !== generated.path) throw openError;
-      const manual = `PDF ${label} pronto. Premi Ctrl+V nella chat WhatsApp per allegarlo`;
-      setPdfShareInstructions(`${manual}. ${openError.message}`);
-      showToast(manual, true);
-      window.alert(`${manual}.\n\nDettaglio: ${openError.message}`);
-      return;
-    }
-    if (!window.confirm(`WhatsApp è stato aperto per ${phone}. Verifica il destinatario visibile nella chat e conferma solo se è corretto. Il messaggio non verrà inviato.`)) {
-      showToast(`Operazione annullata. PDF ${label} salvato: ${generated.path}`);
-      return;
-    }
-    if (await quoteRevision(JSON.stringify(getQuote())) !== generated.revision) throw new Error('Il preventivo è cambiato prima dell’allegato. Rigenera il documento.');
-    const result = await desktopBridge.prepare_whatsapp_pdf(kind, generated.path, phone, quote.id, generated.revision, generated.moduleIds || [], generated.receipt);
-    if (result?.attached === true && result.filename === filename) {
-      setPdfShareInstructions(`PDF ${label} allegato in bozza: ${filename}. Verifica il destinatario e invia manualmente da WhatsApp.`);
-      showToast(`Allegato ${filename} verificato nella chat. Non è stato inviato.`);
-    } else if (result?.clipboardReady === true && result.path === generated.path) {
-      const manual = `PDF ${label} pronto. Premi Ctrl+V nella chat WhatsApp per allegarlo`;
-      setPdfShareInstructions(manual);
-      showToast(manual, true);
-    } else {
-      throw new Error('Non è possibile verificare identità e percorso del PDF negli appunti. Operazione interrotta.');
-    }
+    const manual = `PDF ${label} pronto per l'invio. PDF copiato: premi Ctrl+V nella chat e poi Invio`;
+    const route = result.browserOpened ? `WhatsApp Desktop non disponibile: apertura della chat nel browser richiesta.${result.folderOpened ? ' PDF selezionato nella cartella.' : ''}` : result.desktopOpened ? 'Richiesta apertura WhatsApp Desktop inviata. Se non compare, usa gli altri pulsanti.' : `${result.folderOpened ? 'WhatsApp non avviato; cartella del PDF selezionata. ' : ''}Usa i pulsanti per aprire WhatsApp o la chat nel browser.`;
+    setPdfShareInstructions(`${manual}. ${route}`);
+    showToast(`PDF ${label} pronto per l'invio.`);
   } catch (error) {
+    activeWhatsappPdf = null;
+    actions?.querySelectorAll('button').forEach(button => { button.disabled = true; });
     const failure = `Preparazione WhatsApp interrotta: ${error.message}`;
     setPdfShareInstructions(failure);
     showToast(failure, true);
+  } finally {
+    whatsappShareActive = false;
+    document.querySelectorAll?.('[data-action="share-pdf-whatsapp"]').forEach(button => {
+      button.disabled = button.dataset.kind === 'customer' ? !storagePaths.customer_pdf_dir : !storagePaths.supplier_pdf_dir;
+    });
+  }
+}
+
+async function handleWhatsappPdfAction(action) {
+  const target = activeWhatsappPdf;
+  if (!target || whatsappShareActive) return;
+  whatsappShareActive = true;
+  try {
+    const quote = getQuote();
+    if (!quote || quote.id !== target.quoteId || await quoteRevision(JSON.stringify(quote)) !== target.revision) {
+      throw new Error('Il preventivo è cambiato. Rigenera il PDF prima di continuare.');
+    }
+    const isMac = /Mac|iPhone|iPad/i.test(String(window.navigator?.platform || ''));
+    if (!isMac) {
+      const copied = await desktopBridge.copy_whatsapp_pdf_clipboard(target.kind, target.path, target.phone, target.quoteId, target.revision, target.moduleIds, target.receipt);
+      if (copied?.clipboardReady !== true || copied.path !== target.path) throw new Error('Il PDF corretto non è verificabile negli appunti.');
+    }
+    if (action === 'open-whatsapp') {
+      try { await desktopBridge.open_whatsapp_chat(target.phone, target.message); }
+      catch { await desktopBridge.open_whatsapp_browser(target.phone, target.message); }
+    } else if (action === 'open-whatsapp-browser') {
+      await desktopBridge.open_whatsapp_browser(target.phone, target.message);
+    } else if (action === 'open-pdf-folder') {
+      await desktopBridge.reveal_pdf_in_explorer(target.kind, target.path);
+    }
+  } catch (error) {
+    setPdfShareInstructions(`PDF pronto per l'invio. ${error.message}`);
+    showToast(`PDF pronto per l'invio. ${error.message}`, true);
+  } finally {
+    whatsappShareActive = false;
   }
 }
 
@@ -1272,6 +1309,7 @@ function handleClick(event) {
     }
   } else if (action === 'generate-pdf') generateQuotePdf(button.dataset.kind || 'customer');
   else if (action === 'share-pdf-whatsapp') shareQuotePdfViaWhatsApp(button.dataset.kind || 'customer');
+  else if (['open-whatsapp', 'open-whatsapp-browser', 'open-pdf-folder'].includes(action)) handleWhatsappPdfAction(action);
   else if (action === 'mark-quote-sent') markQuoteSent(button.dataset.kind || 'customer');
   else if (action === 'save-quote') {
     const quote = getQuote();

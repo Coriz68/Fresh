@@ -1,5 +1,7 @@
 import base64
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -121,9 +123,79 @@ class DesktopApiTests(unittest.TestCase):
 
     def test_whatsapp_methods_are_narrowly_exposed_with_existing_store_hidden(self):
         self.assertIn("open_whatsapp_chat", DesktopApi.EXPOSED_METHODS)
+        self.assertIn("open_whatsapp_browser", DesktopApi.EXPOSED_METHODS)
+        self.assertIn("share_whatsapp_pdf", DesktopApi.EXPOSED_METHODS)
         self.assertIn("copy_whatsapp_pdf_clipboard", DesktopApi.EXPOSED_METHODS)
         self.assertIn("prepare_whatsapp_pdf", DesktopApi.EXPOSED_METHODS)
         self.assertFalse(hasattr(self.api, "store"))
+
+    def test_share_whatsapp_pdf_copies_before_open_and_falls_back_to_browser_and_selected_folder(self):
+        customer_dir = self.root / "pdf cliente"
+        customer_dir.mkdir()
+        self.store.set_output_folder("customer", customer_dir)
+        revision = "a" * 64
+        pdf_path = customer_dir / f"preventivo_quote-42_{revision[:12]}_cliente.pdf"
+        pdf_path.write_bytes(b"%PDF-1.7 sample")
+        receipt = {"path": str(pdf_path.resolve())}
+        order = []
+
+        def copy(*args, **kwargs):
+            order.append("copy")
+            return {"clipboardReady": True, "path": args[0], "kind": args[1]}
+
+        def open_desktop(*args, **kwargs):
+            order.append("desktop")
+            raise OSError("protocol unavailable")
+
+        def open_browser(url, **kwargs):
+            order.append(url)
+            return True
+
+        with patch("whatsapp_windows.copy_pdf_to_clipboard", side_effect=copy), patch("whatsapp_windows.open_whatsapp_chat", side_effect=open_desktop), patch("webbrowser.open", side_effect=open_browser), patch("desktop_app._show_pdf_in_explorer", side_effect=lambda path: order.append(("folder", path))):
+            result = self.api.share_whatsapp_pdf("customer", str(pdf_path), "393331234567", "quote-42", revision, [], receipt, "Preventivo PREV-42", platform_name="nt")
+
+        self.assertTrue(result["clipboardReady"])
+        self.assertFalse(result["desktopOpened"])
+        self.assertTrue(result["browserOpened"])
+        self.assertTrue(result["folderOpened"])
+        self.assertEqual(order[0:2], ["copy", "desktop"])
+        self.assertIn("https://web.whatsapp.com/send?phone=393331234567&text=Preventivo%20PREV-42", order[2])
+        self.assertEqual(order[3][0], "folder")
+
+    def test_whatsapp_share_lock_serializes_clipboard_and_launch_procedures(self):
+        customer_dir = self.root / "pdf cliente"
+        customer_dir.mkdir()
+        self.store.set_output_folder("customer", customer_dir)
+        revision = "a" * 64
+        pdf_path = customer_dir / f"preventivo_quote-42_{revision[:12]}_cliente.pdf"
+        pdf_path.write_bytes(b"%PDF-1.7 sample")
+        receipt = {"path": str(pdf_path.resolve())}
+        lock = threading.Lock()
+        active = 0
+        max_active = 0
+
+        def copy(*args, **kwargs):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.03)
+            with lock:
+                active -= 1
+            return {"clipboardReady": True, "path": args[0], "kind": args[1]}
+
+        def share():
+            self.api.share_whatsapp_pdf("customer", str(pdf_path), "393331234567", "quote-42", revision, [], receipt, "Preventivo", platform_name="nt")
+
+        with patch("whatsapp_windows.copy_pdf_to_clipboard", side_effect=copy), patch("whatsapp_windows.open_whatsapp_chat", return_value={"ok": True, "desktopOpened": True}):
+            first = threading.Thread(target=share)
+            second = threading.Thread(target=share)
+            first.start()
+            second.start()
+            first.join()
+            second.join()
+
+        self.assertEqual(max_active, 1)
 
     def test_prepare_whatsapp_pdf_checks_folder_name_and_passes_exact_identity(self):
         customer_dir = self.root / "pdf cliente"
@@ -251,15 +323,18 @@ class DesktopApiTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "PDF"):
             self.api.reveal_pdf_in_explorer("customer", str(wrong_extension), platform_name="nt")
 
-    def test_reveal_pdf_in_explorer_rejects_non_windows_and_reports_explorer_errors(self):
+    def test_reveal_pdf_in_explorer_preserves_finder_support_and_reports_file_manager_errors(self):
         customer_dir = self.root / "pdf cliente"
         customer_dir.mkdir()
         self.store.set_output_folder("customer", customer_dir)
         pdf_path = customer_dir / "preventivo.pdf"
         pdf_path.write_bytes(b"%PDF-1.7 sample")
 
-        with self.assertRaisesRegex(RuntimeError, "Windows"):
-            self.api.reveal_pdf_in_explorer("customer", str(pdf_path), platform_name="darwin")
+        with patch("desktop_app._show_pdf_in_finder") as show_finder:
+            self.assertEqual(self.api.reveal_pdf_in_explorer("customer", str(pdf_path), platform_name="darwin"), {"ok": True})
+        show_finder.assert_called_once_with(pdf_path.resolve())
+        with self.assertRaisesRegex(RuntimeError, "questo sistema"):
+            self.api.reveal_pdf_in_explorer("customer", str(pdf_path), platform_name="linux")
         with patch("desktop_app._show_pdf_in_explorer", side_effect=OSError("Explorer unavailable")):
             with self.assertRaisesRegex(RuntimeError, "Esplora file"):
                 self.api.reveal_pdf_in_explorer("customer", str(pdf_path), platform_name="nt")

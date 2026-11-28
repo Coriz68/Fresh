@@ -103,77 +103,85 @@ class WhatsAppClipboardTests(unittest.TestCase):
                 sequence_reader=lambda: 1,
             )
 
-    def test_open_whatsapp_dispatches_protocol_through_windows_shell(self):
-        with patch.object(whatsapp, "_activate_store_whatsapp", side_effect=RuntimeError("non è Store")), patch.object(whatsapp, "_shell_execute_protocol", return_value=42) as launch, patch.object(whatsapp, "_windows_process_name", return_value="whatsapp.exe"):
-            result = whatsapp.open_whatsapp_chat(
-                "393331234567",
-                platform_name="nt",
-                desktop_factory=lambda **kwargs: FakeDesktop([self.window]),
-            )
-        self.assertEqual(result, {"ok": True})
-        launch.assert_called_once_with("whatsapp://send?phone=393331234567")
-        self.assertTrue(self.window.active)
+    def test_open_whatsapp_uses_registered_protocol_directly_without_store_or_window_wait(self):
+        detector = lambda **_kwargs: {"protocol_registered": True, "store_installed": True, "app_version": "2.3"}
+        with patch.object(whatsapp.os, "startfile", create=True) as startfile, patch.object(whatsapp, "_activate_store_whatsapp") as activate:
+            result = whatsapp.open_whatsapp_chat("393331234567", "Preventivo PREV-42", platform_name="nt", installation_detector=detector)
+        self.assertTrue(result["desktopOpened"])
+        startfile.assert_called_once_with("whatsapp://send?phone=393331234567&text=Preventivo%20PREV-42")
+        activate.assert_not_called()
 
-    def test_open_whatsapp_waits_for_a_visible_whatsapp_window(self):
-        with patch.object(whatsapp, "_shell_execute_protocol", return_value=42), patch.object(whatsapp, "_windows_process_name", return_value="whatsapp.exe"):
-            with self.assertRaisesRegex(RuntimeError, "finestra WhatsApp"):
-                whatsapp.open_whatsapp_chat(
-                    "393331234567",
-                    platform_name="nt",
-                    timeout=0.01,
-                    desktop_factory=lambda **kwargs: FakeDesktop([]),
-                )
-
-    def test_open_whatsapp_recognizes_the_microsoft_store_app_window_identity(self):
-        store_window = FakeWindow()
-        app_id = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"
-        with patch.object(whatsapp, "_activate_store_whatsapp", return_value=1234) as activate, patch.object(whatsapp, "_shell_execute_protocol", return_value=42) as launch:
-            result = whatsapp.open_whatsapp_chat(
-                "393331234567",
-                platform_name="nt",
-                desktop_factory=lambda **kwargs: FakeDesktop([store_window]),
-                process_name_resolver=lambda window: "ApplicationFrameHost.exe",
-                app_user_model_id_resolver=lambda window: app_id,
-            )
-        self.assertEqual(result, {"ok": True})
+    def test_store_activation_is_used_only_after_direct_protocol_launch_fails(self):
+        detector = lambda **_kwargs: {"protocol_registered": True, "store_installed": True, "app_version": "2.3"}
+        with patch.object(whatsapp.os, "startfile", create=True, side_effect=OSError("protocol failed")) as startfile, patch.object(whatsapp, "_activate_store_whatsapp", return_value=1234) as activate, patch.object(whatsapp, "_shell_execute_protocol", return_value=42) as shell:
+            result = whatsapp.open_whatsapp_chat("393331234567", "Ciao", platform_name="nt", installation_detector=detector)
+        self.assertTrue(result["desktopOpened"])
+        startfile.assert_called_once()
         activate.assert_called_once_with()
-        launch.assert_called_once_with("whatsapp://send?phone=393331234567")
-        self.assertTrue(store_window.active)
-
-    def test_open_whatsapp_uses_protocol_fallback_for_classic_installation(self):
-        with patch.object(whatsapp, "_activate_store_whatsapp", side_effect=RuntimeError("Store app non installata")), patch.object(whatsapp, "_shell_execute_protocol", return_value=42) as launch, patch.object(whatsapp, "_windows_process_name", return_value="whatsapp.exe"):
-            result = whatsapp.open_whatsapp_chat(
-                "393331234567",
-                platform_name="nt",
-                desktop_factory=lambda **kwargs: FakeDesktop([self.window]),
-            )
-        self.assertEqual(result, {"ok": True})
-        launch.assert_called_once_with("whatsapp://send?phone=393331234567")
-
-    def test_store_app_stays_open_when_chat_protocol_is_missing(self):
-        store_window = FakeWindow()
-        app_id = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"
-        with patch.object(whatsapp, "_activate_store_whatsapp", return_value=1234), patch.object(whatsapp, "_shell_execute_protocol", return_value=31):
-            with self.assertRaisesRegex(RuntimeError, "WhatsApp Desktop è aperto"):
-                whatsapp.open_whatsapp_chat(
-                    "393331234567",
-                    platform_name="nt",
-                    desktop_factory=lambda **kwargs: FakeDesktop([store_window]),
-                    process_name_resolver=lambda window: "ApplicationFrameHost.exe",
-                    app_user_model_id_resolver=lambda window: app_id,
-                )
-        self.assertTrue(store_window.active)
+        shell.assert_called_once_with("whatsapp://send?phone=393331234567&text=Ciao")
 
     def test_open_whatsapp_reports_missing_protocol_handler(self):
-        with patch.object(whatsapp, "_shell_execute_protocol", return_value=31):
+        detector = lambda **_kwargs: {"protocol_registered": False, "store_installed": False, "app_version": "non rilevabile"}
+        with patch.object(whatsapp.os, "startfile", create=True, side_effect=OSError("startfile")), patch.object(whatsapp, "_activate_store_whatsapp", side_effect=OSError("Store")), patch.object(whatsapp, "_shell_execute_protocol", return_value=31):
             with self.assertRaisesRegex(RuntimeError, "protocollo WhatsApp"):
-                whatsapp.open_whatsapp_chat("393331234567", platform_name="nt")
+                whatsapp.open_whatsapp_chat("393331234567", platform_name="nt", installation_detector=detector)
 
     def test_open_whatsapp_rejects_invalid_phone_before_dispatch(self):
-        with patch.object(whatsapp, "_shell_execute_protocol") as launch:
+        with patch.object(whatsapp.os, "startfile", create=True) as launch:
             with self.assertRaisesRegex(ValueError, "Numero WhatsApp"):
                 whatsapp.open_whatsapp_chat("bad-number", platform_name="nt")
         launch.assert_not_called()
+
+    def test_build_whatsapp_web_url_encodes_prefilled_message_and_validates_phone(self):
+        url = whatsapp.build_whatsapp_web_url("393331234567", "Preventivo PREV/42: pronto")
+        self.assertEqual(url, "https://web.whatsapp.com/send?phone=393331234567&text=Preventivo%20PREV%2F42%3A%20pronto")
+        with self.assertRaisesRegex(ValueError, "Numero WhatsApp"):
+            whatsapp.build_whatsapp_web_url("bad-number", "Ciao")
+
+    def test_protocol_url_encodes_prefilled_text(self):
+        self.assertEqual(whatsapp.build_whatsapp_protocol_url("393331234567", "PREV/42: pronto"), "whatsapp://send?phone=393331234567&text=PREV%2F42%3A%20pronto")
+
+    def test_desktop_launch_failure_opens_browser_fallback(self):
+        opened = []
+        result = whatsapp.open_whatsapp_with_fallback(
+            "393331234567",
+            "PDF pronto",
+            desktop_open=lambda *_args: (_ for _ in ()).throw(RuntimeError("desktop non disponibile")),
+            browser_open=lambda url: opened.append(url) or True,
+        )
+        self.assertFalse(result["desktopOpened"])
+        self.assertTrue(result["browserOpened"])
+        self.assertEqual(opened, ["https://web.whatsapp.com/send?phone=393331234567&text=PDF%20pronto"])
+
+    def test_whatsapp_diagnostic_log_omits_sensitive_arguments_and_exception_text(self):
+        import io
+        import logging
+
+        stream = io.StringIO()
+        logger = logging.getLogger("test.whatsapp.safe")
+        logger.handlers.clear()
+        logger.propagate = False
+        logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler(stream)
+        logger.addHandler(handler)
+        try:
+            whatsapp.log_whatsapp_event(
+                logger,
+                "clipboard",
+                "verified",
+                error=RuntimeError("Cliente Mario Rossi prezzo 1234 /Users/mario/preventivo.pdf"),
+                app_version="2.3000.1",
+                windows_version="11.0.1",
+            )
+        finally:
+            logger.removeHandler(handler)
+        output = stream.getvalue()
+        self.assertIn("clipboard", output)
+        self.assertIn("RuntimeError", output)
+        self.assertIn("2.3000.1", output)
+        self.assertIn("11.0.1", output)
+        for sensitive in ("Mario Rossi", "1234", "/Users/mario", "preventivo.pdf"):
+            self.assertNotIn(sensitive, output)
 
     def test_existing_exact_clipboard_path_is_preserved_and_only_ctrl_v_is_used(self):
         self.clipboard = [str(self.pdf)]
@@ -308,6 +316,16 @@ class WhatsAppClipboardTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "dati commerciali"):
                 whatsapp._validate_document(self.pdf, {"quote_id": QUOTE_ID, "revision": REVISION, "kind": "supplier", "recipient": "393331234567", "module_ids": "item-1"})
 
+    def test_supplier_pdf_rejects_any_currency_amount_or_commercial_tax_label(self):
+        metadata = {"/Keywords": f"quote_id={QUOTE_ID}, revision={REVISION}, kind=supplier, recipient=393331234567, module_ids=item-1"}
+        for text in ("Prezzo: 150,00 €", "IVA 22%", "Importo 125 euro"):
+            fake_reader = lambda _path, **kwargs: types.SimpleNamespace(
+                pages=[types.SimpleNamespace(extract_text=lambda: text)], metadata=metadata, get_fields=lambda: {}
+            )
+            with self.subTest(text=text), patch.dict(sys.modules, {"pypdf": types.SimpleNamespace(PdfReader=fake_reader)}):
+                with self.assertRaisesRegex(RuntimeError, "dati commerciali"):
+                    whatsapp._validate_document(self.pdf, {"quote_id": QUOTE_ID, "revision": REVISION, "kind": "supplier", "recipient": "393331234567", "module_ids": "item-1"})
+
     def test_metadata_values_are_compared_as_complete_tokens(self):
         metadata = {"/Keywords": f"quote_id={QUOTE_ID}-stale, revision={REVISION}, kind=customer, recipient=393331234567"}
         fake_reader = lambda _path, **kwargs: types.SimpleNamespace(
@@ -332,6 +350,24 @@ class WhatsAppClipboardTests(unittest.TestCase):
             stream.write(b" ")
         with self.assertRaisesRegex(RuntimeError, "cambiato dopo"):
             whatsapp._verified_receipt(self.pdf, identity, receipt)
+
+    @unittest.skipIf(pypdf is None, "pypdf deve essere installato per verificare il contenuto PDF reale")
+    def test_real_supplier_pdf_reader_rejects_prices_and_vat_text(self):
+        from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+
+        writer = pypdf.PdfWriter()
+        page = writer.add_blank_page(width=595, height=842)
+        font = DictionaryObject({NameObject("/Type"): NameObject("/Font"), NameObject("/Subtype"): NameObject("/Type1"), NameObject("/BaseFont"): NameObject("/Helvetica")})
+        page[NameObject("/Resources")] = DictionaryObject({NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})})
+        content = DecodedStreamObject()
+        content.set_data(b"BT /F1 12 Tf 72 720 Td (Larghezza 300 cm - IVA 22% - prezzo 150,00 EUR - totale 150,00 EUR) Tj ET")
+        page[NameObject("/Contents")] = content
+        writer.add_metadata({"/Title": "Moduli fornitore", "/Keywords": f"quote_id={QUOTE_ID}, revision={REVISION}, kind=supplier, recipient=393331234567, module_ids=item-1"})
+        with self.pdf.open("wb") as stream:
+            writer.write(stream)
+        identity = {"quote_id": QUOTE_ID, "revision": REVISION, "kind": "supplier", "recipient": "393331234567", "module_ids": "item-1"}
+        with self.assertRaisesRegex(RuntimeError, "dati commerciali"):
+            whatsapp._validate_document(self.pdf, identity)
 
 
 if __name__ == "__main__":

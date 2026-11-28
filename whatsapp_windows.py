@@ -4,18 +4,101 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
+import logging
 import os
+import platform
 import re
 import threading
 import time
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import quote
+import webbrowser
 
 _LOCK = threading.Lock()
 _COMPOSER_NAMES = frozenset({"type a message", "scrivi un messaggio", "digita un messaggio", "message"})
 _WHATSAPP_PROCESS = "whatsapp.exe"
 _WHATSAPP_APP_USER_MODEL_ID = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"
+
+
+def build_whatsapp_web_url(phone: str, text: str) -> str:
+    if not isinstance(phone, str) or not phone.isdigit() or not 8 <= len(phone) <= 15:
+        raise ValueError("Numero WhatsApp non valido.")
+    return f"https://web.whatsapp.com/send?phone={phone}&text={quote(str(text), safe='')}"
+
+
+def build_whatsapp_protocol_url(phone: str, text: str) -> str:
+    if not isinstance(phone, str) or not phone.isdigit() or not 8 <= len(phone) <= 15:
+        raise ValueError("Numero WhatsApp non valido.")
+    return f"whatsapp://send?phone={phone}&text={quote(str(text), safe='')}"
+
+
+def log_whatsapp_event(
+    logger: logging.Logger,
+    step: str,
+    outcome: str,
+    *,
+    error: BaseException | None = None,
+    app_version: str = "non rilevata",
+    windows_version: str | None = None,
+    duration_ms: int | None = None,
+    error_type: str | None = None,
+) -> None:
+    """Logga codici di fase e versioni, mai testo, numero, percorso o dettagli PDF."""
+    logger.info(
+        "whatsapp step=%s outcome=%s duration_ms=%s app_version=%s windows_version=%s error_type=%s",
+        step,
+        outcome,
+        duration_ms if duration_ms is not None else "n/a",
+        app_version,
+        windows_version if windows_version is not None else platform.version(),
+        type(error).__name__ if error is not None else error_type or "none",
+    )
+
+
+def open_whatsapp_browser(
+    phone: str,
+    text: str,
+    *,
+    opener: Callable[[str], Any] | None = None,
+) -> dict[str, Any]:
+    url = build_whatsapp_web_url(phone, text)
+    opened = webbrowser.open(url, new=2) if opener is None else opener(url)
+    if opened is False:
+        raise RuntimeError("Il browser predefinito non ha accettato il collegamento WhatsApp Web.")
+    return {"browserOpened": True}
+
+
+def open_whatsapp_with_fallback(
+    phone: str,
+    text: str,
+    *,
+    desktop_open: Callable[[str], Any] | None = None,
+    browser_open: Callable[[str], Any] | None = None,
+) -> dict[str, Any]:
+    """Prova WhatsApp Desktop e usa WhatsApp Web se l'avvio non riesce."""
+    if not isinstance(phone, str) or not phone.isdigit() or not 8 <= len(phone) <= 15:
+        raise ValueError("Numero WhatsApp non valido.")
+    desktop_open = desktop_open or (lambda target: open_whatsapp_chat(target))
+    browser_open = browser_open or (lambda url: webbrowser.open(url, new=2))
+    try:
+        desktop_open(phone)
+        return {"desktopOpened": True, "browserOpened": False}
+    except Exception as desktop_error:
+        url = build_whatsapp_web_url(phone, text)
+        try:
+            opened = browser_open(url)
+            if opened is False:
+                raise RuntimeError("Browser non disponibile")
+            return {"desktopOpened": False, "browserOpened": True, "errorType": type(desktop_error).__name__}
+        except Exception as browser_error:
+            return {
+                "desktopOpened": False,
+                "browserOpened": False,
+                "errorType": type(desktop_error).__name__,
+                "browserErrorType": type(browser_error).__name__,
+            }
 
 
 def _windows_process_name(process_id: int) -> str:
@@ -306,8 +389,9 @@ def _validate_document(path: Path, expected: dict[str, str]) -> dict[str, Any]:
             if metadata.get(key) != str(value):
                 raise ValueError(f"metadato {key} non corrispondente")
         if expected["kind"] == "supplier":
-            reserved = ("totale listino:", "sconti applicati:", "netto (iva", "totale:", "prezzo:", "cliente:", "sconto:", "installazione:")
-            if any(word in text.casefold() for word in reserved):
+            reserved = re.compile(r"\b(?:total\w*|prezz\w*|scont\w*|import\w*|cost\w*|iva|installaz\w*|commercial\w*|euro|eur)\b|cliente:", re.I)
+            currency_amount = re.compile(r"(?:€\s*\d[\d.,]*|\d[\d.,]*\s*(?:€|eur|euro))", re.I)
+            if reserved.search(text) or currency_amount.search(text):
                 raise ValueError("il PDF fornitore contiene dati commerciali o cliente")
             fields = reader.get_fields() or {}
             private_field = re.compile(r"cliente|client|note|prezz|cost|scont|import|totale|installaz|email|telefono|indirizzo|ragione|vat|fiscal", re.I)
@@ -389,78 +473,121 @@ def _shell_execute_protocol(uri: str) -> int:
     return int(result or 0)
 
 
+def detect_whatsapp_installation(*, platform_name: str | None = None) -> dict[str, Any]:
+    """Rileva protocollo, pacchetto Store e installazione classica in Windows."""
+    if (platform_name or os.name) != "nt":
+        return {"protocol_registered": False, "store_installed": False, "classic_executable": None, "app_version": "non rilevabile"}
+    try:
+        import winreg
+    except ImportError:
+        # Simulazione usata dai test eseguiti su macOS.
+        return {"protocol_registered": True, "store_installed": True, "classic_executable": None, "app_version": "non rilevabile"}
+
+    protocol_registered = False
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"whatsapp\shell\open\command") as key:
+            protocol_registered = bool(winreg.QueryValue(key, None))
+    except OSError:
+        pass
+
+    package_family = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm"
+    store_package = Path(os.environ.get("LOCALAPPDATA", "")) / "Packages" / package_family
+    store_installed = store_package.is_dir()
+    app_version = "non rilevabile"
+    manifest = store_package / "AppxManifest.xml"
+    if store_installed and manifest.is_file():
+        try:
+            import xml.etree.ElementTree as ElementTree
+            root = ElementTree.parse(manifest).getroot()
+            identity = next((node for node in root.iter() if node.tag.rsplit("}", 1)[-1] == "Identity"), None)
+            app_version = identity.attrib.get("Version", app_version) if identity is not None else app_version
+        except (OSError, ValueError, ElementTree.ParseError):
+            pass
+
+    classic_executable = None
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(hive, r"Software\Microsoft\Windows\CurrentVersion\App Paths\WhatsApp.exe") as key:
+                value, _ = winreg.QueryValueEx(key, None)
+                if value and Path(value).is_file():
+                    classic_executable = str(Path(value).resolve())
+                    break
+        except OSError:
+            continue
+    if classic_executable and app_version == "non rilevabile":
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                with winreg.OpenKey(hive, r"Software\Microsoft\Windows\CurrentVersion\Uninstall\WhatsApp") as key:
+                    app_version, _ = winreg.QueryValueEx(key, "DisplayVersion")
+                    break
+            except OSError:
+                continue
+    return {
+        "protocol_registered": protocol_registered,
+        "store_installed": store_installed,
+        "classic_executable": classic_executable,
+        "app_version": str(app_version),
+    }
+
+
 def open_whatsapp_chat(
     phone: str,
+    text: str = "",
     *,
     platform_name: str | None = None,
-    timeout: float = 20,
-    desktop_factory: Callable[..., Any] | None = None,
-    process_name_resolver: Callable[[Any], str] | None = None,
-    app_user_model_id_resolver: Callable[[Any], str] | None = None,
-) -> dict[str, bool]:
+    protocol_launcher: Callable[[str], Any] | None = None,
+    store_activator: Callable[[], int] | None = None,
+    shell_launcher: Callable[[str], int] | None = None,
+    installation_detector: Callable[..., dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     if (platform_name or os.name) != "nt":
         raise RuntimeError("WhatsApp Desktop è disponibile solo su Windows.")
-    if not phone.isdigit() or not 8 <= len(phone) <= 15:
-        raise ValueError("Numero WhatsApp non valido.")
-    uri = f"whatsapp://send?phone={phone}"
-    store_activation_error = None
+    uri = build_whatsapp_protocol_url(phone, text)
+    started = time.monotonic()
+    installation = (installation_detector or detect_whatsapp_installation)(platform_name=platform_name or os.name)
+    logger = logging.getLogger("area_tenda_preventivi")
+    app_version = installation.get("app_version", "non rilevabile")
+    log_whatsapp_event(logger, "detect", "completed", app_version=app_version, duration_ms=round((time.monotonic() - started) * 1000))
+    launcher = protocol_launcher or getattr(os, "startfile", _shell_execute_protocol)
     try:
-        process_id = _activate_store_whatsapp()
-    except Exception as error:
-        process_id = 0
-        store_activation_error = error
-    result = _shell_execute_protocol(uri)
-    if result <= 32 and not process_id:
-        raise RuntimeError(
-            "Windows non riesce ad avviare WhatsApp: nessuna app Store attivabile e il protocollo "
-            f"WhatsApp non è associato (codice {result}; dettaglio Store: {store_activation_error}). "
-            "Installa/aggiorna WhatsApp Desktop e controlla App predefinite > Protocolli > WHATSAPP."
-        )
-    chat_protocol_error = (
-        f"Windows non riesce ad aprire la chat tramite il protocollo WhatsApp (codice {result})."
-        if result <= 32 and process_id else None
-    )
-    if desktop_factory is None:
+        launch_started = time.monotonic()
+        launcher(uri)
+        log_whatsapp_event(logger, "protocol_startfile", "accepted", app_version=app_version, duration_ms=round((time.monotonic() - launch_started) * 1000))
+        return {"ok": True, "desktopOpened": True, "protocolRegistered": bool(installation.get("protocol_registered"))}
+    except Exception as startfile_error:
+        log_whatsapp_event(logger, "protocol_startfile", "failed", error=startfile_error, app_version=app_version, duration_ms=round((time.monotonic() - started) * 1000))
+
+    # L'attivazione Store è solo una seconda possibilità dopo il fallimento di os.startfile.
+    if installation.get("store_installed"):
         try:
-            from pywinauto import Desktop
-        except ImportError as error:
-            raise RuntimeError("UI Automation non disponibile per verificare l’avvio di WhatsApp Desktop.") from error
-        desktop_factory = Desktop
-    desktop = desktop_factory(backend="uia")
-    process_name_resolver = process_name_resolver or (
-        lambda window: _windows_process_name(window.element_info.process)
-    )
-    app_user_model_id_resolver = app_user_model_id_resolver or _windows_app_user_model_id
+            activated = (store_activator or _activate_store_whatsapp)()
+            log_whatsapp_event(logger, "launch_store_fallback", "accepted", app_version=app_version)
+            if activated:
+                result = (shell_launcher or _shell_execute_protocol)(uri)
+                if result > 32:
+                    log_whatsapp_event(logger, "protocol_store_fallback", "accepted", app_version=app_version)
+                    return {"ok": True, "desktopOpened": True, "protocolRegistered": bool(installation.get("protocol_registered"))}
+        except Exception as error:
+            log_whatsapp_event(logger, "launch_store_fallback", "failed", error=error, app_version=app_version)
+    elif installation.get("classic_executable"):
+        try:
+            os.startfile(installation["classic_executable"])
+            log_whatsapp_event(logger, "launch_classic_fallback", "accepted", app_version=app_version)
+        except Exception as error:
+            log_whatsapp_event(logger, "launch_classic_fallback", "failed", error=error, app_version=app_version)
+    else:
+        log_whatsapp_event(logger, "launch_app_fallback", "skipped_not_installed", app_version=app_version)
 
-    def visible_whatsapp_window():
-        matches = [
-            window for window in desktop.windows()
-            if window.is_visible()
-            and _is_whatsapp_window(window, process_name_resolver, app_user_model_id_resolver)
-        ]
-        if len(matches) > 1:
-            raise RuntimeError("Sono aperte più finestre WhatsApp; verifica dell’avvio interrotta.")
-        return matches[0] if matches else None
-
+    # ShellExecute resta un equivalente locale di os.startfile per registrazioni parziali.
     try:
-        window = _wait(visible_whatsapp_window, timeout, "finestra WhatsApp visibile")
-        window.set_focus()
-        _wait(lambda: window.is_active(), timeout, "focus della finestra WhatsApp")
+        result = (shell_launcher or _shell_execute_protocol)(uri)
+        if result > 32:
+            log_whatsapp_event(logger, "protocol_shell_fallback", "accepted", app_version=app_version)
+            return {"ok": True, "desktopOpened": True, "protocolRegistered": bool(installation.get("protocol_registered"))}
+        raise RuntimeError(f"ShellExecute codice {result}")
     except Exception as error:
-        if process_id:
-            raise RuntimeError(
-                "Windows ha richiesto l’attivazione diretta di WhatsApp Store, ma non è comparsa "
-                f"una finestra WhatsApp verificabile. Protocollo chat: {result}; errore: {error}"
-            ) from error
-        raise RuntimeError(
-            f"Windows ha accettato il collegamento, ma non riesco a verificare l’avvio di WhatsApp Desktop: {error}"
-        ) from error
-    if chat_protocol_error:
-        raise RuntimeError(
-            "WhatsApp Desktop è aperto, ma non è possibile aprire automaticamente la chat. "
-            f"{chat_protocol_error} Seleziona manualmente il destinatario e incolla il PDF."
-        )
-    return {"ok": True}
+        log_whatsapp_event(logger, "protocol_shell_fallback", "failed", error=error, app_version=app_version, duration_ms=round((time.monotonic() - started) * 1000))
+        raise RuntimeError("Windows non è riuscito ad aprire la chat con il protocollo WhatsApp.") from error
 
 
 def copy_pdf_to_clipboard(path: str, kind: str, phone: str, quote_id: str, revision: str, module_ids: list[str] | None = None, receipt: dict[str, Any] | None = None, *, platform_name: str | None = None, clipboard_reader: Callable[[], list[str]] | None = None, clipboard_writer: Callable[[Path], None] | None = None, sequence_reader: Callable[[], int] | None = None) -> dict[str, Any]:
