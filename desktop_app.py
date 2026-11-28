@@ -224,6 +224,9 @@ class DesktopApi:
         "import_backup",
         "request_close",
         "reveal_pdf_in_explorer",
+        "open_whatsapp_chat",
+        "copy_whatsapp_pdf_clipboard",
+        "prepare_whatsapp_pdf",
         "log_event",
     })
     _ALLOWED_FRONTEND_EVENTS = frozenset({
@@ -299,6 +302,38 @@ class DesktopApi:
         APP_LOGGER.info("Explorer opened on prepared PDF (%s)", kind)
         return {"ok": True}
 
+    def open_whatsapp_chat(self, phone: str, *, platform_name: str | None = None) -> dict[str, bool]:
+        from whatsapp_windows import open_whatsapp_chat
+        return open_whatsapp_chat(phone, platform_name=platform_name)
+
+    def copy_whatsapp_pdf_clipboard(self, kind: str, path: str, phone: str, quote_id: str, revision: str, module_ids: list[str] | None = None, receipt: dict[str, Any] | None = None, *, platform_name: str | None = None) -> dict[str, Any]:
+        from whatsapp_windows import copy_pdf_to_clipboard
+        return self._prepare_whatsapp_clipboard(copy_pdf_to_clipboard, kind, path, phone, quote_id, revision, module_ids, receipt, platform_name)
+
+    def prepare_whatsapp_pdf(self, kind: str, path: str, phone: str, quote_id: str, revision: str, module_ids: list[str] | None = None, receipt: dict[str, Any] | None = None, *, platform_name: str | None = None) -> dict[str, Any]:
+        from whatsapp_windows import prepare_whatsapp_pdf
+        return self._prepare_whatsapp_clipboard(prepare_whatsapp_pdf, kind, path, phone, quote_id, revision, module_ids, receipt, platform_name)
+
+    def _prepare_whatsapp_clipboard(self, operation: Any, kind: str, path: str, phone: str, quote_id: str, revision: str, module_ids: list[str] | None, receipt: dict[str, Any] | None, platform_name: str | None) -> dict[str, Any]:
+        path_key = {"customer": "customer_pdf_dir", "supplier": "supplier_pdf_dir"}.get(kind)
+        if path_key is None:
+            raise ValueError("Tipo PDF non riconosciuto.")
+        configured_folder = self._store.settings.get(path_key)
+        if not configured_folder:
+            raise ValueError("Cartella PDF non configurata.")
+        pdf_path = Path(path).expanduser().resolve(strict=True)
+        if pdf_path.parent != Path(configured_folder).expanduser().resolve():
+            raise ValueError("Il PDF non appartiene alla cartella configurata per questa tipologia.")
+        if pdf_path.suffix.casefold() != ".pdf":
+            raise ValueError("Il documento selezionato non è un PDF.")
+        prefix = "cliente" if kind == "customer" else "fornitore"
+        expected_stem = f"preventivo_{quote_id}_{revision[:12]}_{prefix}"
+        if pdf_path.stem != expected_stem and not (pdf_path.stem.startswith(expected_stem + "_") and pdf_path.stem[len(expected_stem) + 1:].isdigit()):
+            raise ValueError("Il nome del documento non corrisponde a preventivo, revisione e tipologia correnti.")
+        if not receipt or receipt.get("path") != str(pdf_path):
+            raise ValueError("Ricevuta PDF mancante o associata a un percorso diverso.")
+        return operation(str(pdf_path), kind, phone, quote_id, revision, module_ids, receipt, platform_name=platform_name)
+
     def load_initial_data(self) -> dict[str, Any]:
         started = time.perf_counter()
         try:
@@ -350,12 +385,21 @@ class DesktopApi:
         paths = self._store.set_output_folder(kind, selected)
         return {"paths": paths, "path": paths[path_key]}
 
-    def write_pdf(self, kind: str, filename: str, base64_data: str) -> dict[str, str]:
+    def write_pdf(self, kind: str, filename: str, base64_data: str, identity: dict[str, Any] | None = None) -> dict[str, Any]:
         started = time.perf_counter()
         safe_kind = kind if kind in ("customer", "supplier") else "unknown"
         APP_LOGGER.info("PDF disk save started (%s)", safe_kind)
+        if identity is not None and identity.get("kind") != kind:
+            raise ValueError("Tipologia documento non corrispondente.")
         try:
             result = self._store.write_pdf(kind, filename, base64_data)
+            if identity is not None:
+                from whatsapp_windows import create_pdf_receipt
+                try:
+                    result["receipt"] = create_pdf_receipt(result["path"], identity)
+                except Exception:
+                    Path(result["path"]).unlink(missing_ok=True)
+                    raise
         except Exception:
             APP_LOGGER.exception("PDF disk save failed (%s)", safe_kind)
             raise

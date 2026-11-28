@@ -286,12 +286,25 @@ function activeClient(quote) {
   return quote.clientSnapshot || snapshotClient(getClient(quote.clientId));
 }
 
-function quoteModuleData(kind, originalData, client, quote) {
-  return {
-    ...structuredClone(originalData || {}),
-    cliente: client.name || client.company || '',
-    riferimento: quote.number
-  };
+function quoteModuleData(kind, originalData, client, quote, schemaFields = []) {
+  const data = structuredClone(originalData || {});
+  if (kind === 'supplier') {
+    if (!schemaFields.length) throw new Error('Schema tecnico del modulo non verificabile: PDF fornitore bloccato.');
+    const allowed = new Set(schemaFields.flatMap(field => [field.id, field.key]).filter(Boolean));
+    const privateKey = /cliente|client|note|prezz|cost|scont|import|totale|installaz|commercial|email|telefono|indirizzo|ragione|vat|fiscal/i;
+    const filtered = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (allowed.has(key) && !privateKey.test(key)) filtered[key] = value;
+    }
+    const identityValues = [client.name, client.company, client.taxCode, client.vatNumber, client.address, client.email, client.phone]
+      .map(value => String(value || '').trim().toLocaleLowerCase()).filter(value => value.length >= 4);
+    const flatten = value => typeof value === 'string' ? [value] : Array.isArray(value) ? value.flatMap(flatten) : value && typeof value === 'object' ? Object.values(value).flatMap(flatten) : [];
+    const technicalValues = flatten(filtered).join(' ').toLocaleLowerCase();
+    if (identityValues.some(value => technicalValues.includes(value))) throw new Error('Un campo tecnico contiene dati anagrafici del cliente. PDF fornitore bloccato.');
+    filtered.riferimento = quote.number;
+    return filtered;
+  }
+  return { ...data, cliente: client.name || client.company || '', riferimento: quote.number };
 }
 
 function quoteTotals(quote) {
@@ -567,7 +580,7 @@ function renderQuote() {
         <button class="button" data-action="generate-pdf" data-kind="supplier">Genera PDF fornitore · soli moduli</button>
         ${desktopBridge ? `<button class="button" data-action="share-pdf-whatsapp" data-kind="customer" ${storagePaths.customer_pdf_dir ? '' : 'disabled'}>Condividi PDF cliente con WhatsApp</button>
         <button class="button" data-action="share-pdf-whatsapp" data-kind="supplier" ${storagePaths.supplier_pdf_dir ? '' : 'disabled'}>Condividi PDF fornitore con WhatsApp</button>
-        <div class="footer-note">Il pulsante apre Esplora file sul PDF. Scegli Condividi → WhatsApp, verifica destinatario e documento, poi invia manualmente.</div>` : ''}
+        <div class="footer-note">Il pulsante apre la chat WhatsApp, chiede conferma del destinatario e prepara l’allegato. Verifica il documento e invia manualmente.</div>` : ''}
         <button class="button" data-action="mark-quote-sent" data-kind="customer">Conferma invio PDF cliente</button>
         <button class="button" data-action="mark-quote-sent" data-kind="supplier">Conferma invio PDF fornitore</button>
         <button class="button" data-action="save-quote">Salva preventivo</button>
@@ -891,26 +904,70 @@ function setPdfShareInstructions(message) {
 }
 
 async function shareQuotePdfViaWhatsApp(kind) {
-  if (!desktopBridge?.reveal_pdf_in_explorer) {
+  if (!desktopBridge?.prepare_whatsapp_pdf || !desktopBridge?.open_whatsapp_chat) {
     showToast('La condivisione WhatsApp è disponibile nella finestra desktop.', true);
     return;
   }
   if (!['customer', 'supplier'].includes(kind)) return;
   const quote = getQuote();
   if (!quote) return;
+  const client = activeClient(quote);
+  let phone = '';
+  if (kind === 'customer') phone = normalizePhoneNumber(client?.phone || '').value.replace(/\D/g, '');
+  else phone = normalizePhoneNumber(window.prompt('Inserisci il numero WhatsApp del fornitore, con prefisso internazionale:') || '').value.replace(/\D/g, '');
+  if (!phone) {
+    showToast(`Numero WhatsApp ${kind === 'customer' ? 'cliente' : 'fornitore'} mancante o non valido.`, true);
+    return;
+  }
+  let supplierItemIds = null;
+  if (kind === 'supplier') {
+    const choices = quote.items.map((item, index) => `${index + 1}. ${modules.find(model => model.id === item.moduleId)?.name || item.moduleId}`).join('\n');
+    const answer = window.prompt(`Seleziona i moduli pertinenti a questo fornitore, indicando i numeri separati da virgola.\n${choices}`) || '';
+    const indexes = answer.split(/[,;\s]+/).filter(Boolean).map(value => Number(value));
+    if (!indexes.length || indexes.some(index => !Number.isInteger(index) || index < 1 || index > quote.items.length) || new Set(indexes).size !== indexes.length) {
+      showToast('Selezione moduli fornitore non valida. PDF non generato.', true);
+      return;
+    }
+    supplierItemIds = indexes.map(index => quote.items[index - 1].id);
+  }
   let generated = null;
   try {
-    generated = await generateQuotePdf(kind);
+    generated = await generateQuotePdf(kind, phone, supplierItemIds);
     if (!generated?.path) return;
+    if (!generated.receipt || generated.receipt.path !== generated.path || generated.receipt.sha256?.length !== 64) throw new Error('Ricevuta di integrità PDF non disponibile. Operazione interrotta.');
+    if (await quoteRevision(JSON.stringify(getQuote())) !== generated.revision) throw new Error('Il preventivo è cambiato dopo la generazione del PDF. Rigenera il documento.');
     const filename = generated.path.split(/[\\/]/).pop();
-    const instructions = `PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} pronto: ${filename}. In Esplora file scegli Condividi → WhatsApp, seleziona il destinatario e verifica il documento prima di inviare.`;
+    const label = kind === 'customer' ? 'CLIENTE' : 'FORNITORE';
+    const instructions = `PDF ${label} pronto. Verifica che WhatsApp abbia aperto la chat del destinatario corretto e conferma per preparare l’allegato.`;
     setPdfShareInstructions(instructions);
-    await desktopBridge.reveal_pdf_in_explorer(kind, generated.path);
-    showToast(`Esplora file ha selezionato ${filename}. Scegli Condividi → WhatsApp e controlla il destinatario.`);
+    try {
+      await desktopBridge.open_whatsapp_chat(phone);
+    } catch (openError) {
+      const copied = await desktopBridge.copy_whatsapp_pdf_clipboard(kind, generated.path, phone, quote.id, generated.revision, generated.moduleIds || [], generated.receipt);
+      if (copied?.clipboardReady !== true || copied.path !== generated.path) throw openError;
+      const manual = `PDF ${label} pronto. Premi Ctrl+V nella chat WhatsApp per allegarlo`;
+      setPdfShareInstructions(manual);
+      showToast(manual, true);
+      return;
+    }
+    if (!window.confirm(`WhatsApp è stato aperto per ${phone}. Verifica il destinatario visibile nella chat e conferma solo se è corretto. Il messaggio non verrà inviato.`)) {
+      showToast(`Operazione annullata. PDF ${label} salvato: ${generated.path}`);
+      return;
+    }
+    if (await quoteRevision(JSON.stringify(getQuote())) !== generated.revision) throw new Error('Il preventivo è cambiato prima dell’allegato. Rigenera il documento.');
+    const result = await desktopBridge.prepare_whatsapp_pdf(kind, generated.path, phone, quote.id, generated.revision, generated.moduleIds || [], generated.receipt);
+    if (result?.attached === true && result.filename === filename) {
+      setPdfShareInstructions(`PDF ${label} allegato in bozza: ${filename}. Verifica il destinatario e invia manualmente da WhatsApp.`);
+      showToast(`Allegato ${filename} verificato nella chat. Non è stato inviato.`);
+    } else if (result?.clipboardReady === true && result.path === generated.path) {
+      const manual = `PDF ${label} pronto. Premi Ctrl+V nella chat WhatsApp per allegarlo`;
+      setPdfShareInstructions(manual);
+      showToast(manual, true);
+    } else {
+      throw new Error('Non è possibile verificare identità e percorso del PDF negli appunti. Operazione interrotta.');
+    }
   } catch (error) {
-    const filename = generated?.path ? generated.path.split(/[\\/]/).pop() : '';
-    const fallback = generated?.path ? ` PDF salvato in: ${generated.path}. Aprilo manualmente.` : '';
-    const failure = `${filename ? `Condivisione non preparata per ${filename}` : 'Condivisione non preparata'}: ${error.message}.${fallback}`;
+    const failure = `Preparazione WhatsApp interrotta: ${error.message}`;
     setPdfShareInstructions(failure);
     showToast(failure, true);
   }
@@ -933,10 +990,19 @@ async function markQuoteSent(kind) {
   showToast(`${label} registrato come inviato.`);
 }
 
-async function generateQuotePdf(kind = 'customer') {
+async function generateQuotePdf(kind = 'customer', recipient = '', supplierItemIds = null) {
   const quote = getQuote();
   if (!quote) return;
   const client = activeClient(quote);
+  let includedItems = quote.items;
+  if (kind === 'supplier') {
+    if (!Array.isArray(supplierItemIds) || !supplierItemIds.length || supplierItemIds.some(id => !id) || new Set(supplierItemIds).size !== supplierItemIds.length) {
+      throw new Error('Identità dei moduli pertinenti al fornitore non verificabile.');
+    }
+    includedItems = supplierItemIds.map(id => quote.items.find(item => item.id === id));
+    if (includedItems.some(item => !item)) throw new Error('La selezione dei moduli non corrisponde al preventivo corrente.');
+  }
+  if (!includedItems.length) throw new Error('Seleziona almeno un modulo tecnico per il PDF fornitore.');
   if (!client || !(client.name || client.company)) {
     showToast('Seleziona un cliente con nome o ragione sociale.', true);
     return;
@@ -945,7 +1011,7 @@ async function generateQuotePdf(kind = 'customer') {
     showToast('Inserisci il nome aziendale nelle impostazioni PDF.', true);
     return;
   }
-  if (!quote.items.length) {
+  if (!includedItems.length) {
     showToast('Aggiungi almeno un modulo al preventivo.', true);
     return;
   }
@@ -963,29 +1029,36 @@ async function generateQuotePdf(kind = 'customer') {
     return;
   }
   pdfGenerationActive = true;
+  let quoteSnapshot = '';
   logDesktopEvent('pdf_generation_started');
   document.querySelectorAll('[data-action="generate-pdf"]').forEach(button => { button.disabled = true; });
   document.querySelectorAll('[data-action="share-pdf-whatsapp"]').forEach(button => { button.disabled = true; });
   const resumeModuleItemId = moduleDialog.open ? activeModuleItemId : null;
   let savedPdfPath = '';
+  let savedPdfReceipt = null;
   try {
     if (resumeModuleItemId) {
       await pullActiveModule();
     }
+    quoteSnapshot = JSON.stringify(quote);
     showPdfProgress(`Preparo il PDF ${kind === 'customer' ? 'cliente' : 'fornitore'}…`);
     const modulePdfs = [];
     try {
-      for (let index = 0; index < quote.items.length; index++) {
-        const item = quote.items[index];
+      for (let index = 0; index < includedItems.length; index++) {
+        const item = includedItems[index];
         logDesktopEvent('pdf_module_started');
         const model = modules.find(entry => entry.id === item.moduleId);
         if (!model) throw new Error(`Modulo non trovato: ${item.moduleId}.`);
         const originalData = structuredClone(item.data || {});
-        const moduleData = quoteModuleData(kind, originalData, client, quote);
         await loadModuleFrame(model);
+        const schemaText = frame.contentDocument?.getElementById('schema')?.textContent || '{}';
+        let schemaFields;
+        try { schemaFields = JSON.parse(schemaText).fields || []; }
+        catch { throw new Error(`Schema del modulo ${model.name} non verificabile.`); }
+        const moduleData = quoteModuleData(kind, originalData, client, quote, schemaFields);
         await requestModule('set-data', { data: moduleData });
         try {
-          showPdfProgress(`Creo il PDF del modulo ${index + 1} di ${quote.items.length}: ${model.name}…`);
+          showPdfProgress(`Creo il PDF del modulo ${index + 1} di ${includedItems.length}: ${model.name}…`);
           const response = await requestModule('get-pdf');
           modulePdfs.push(response.bytes);
         } finally {
@@ -994,12 +1067,16 @@ async function generateQuotePdf(kind = 'customer') {
       }
       const payload = {
         quote: {
+          id: quote.id,
+          revision: await quoteRevision(quoteSnapshot),
+          kind,
+          recipient,
           number: quote.number,
           createdAt: quote.createdAt,
           validityDays: quote.validityDays,
           vatRate: quote.vatRate,
           notes: quote.notes,
-          items: quote.items.map(({ moduleId, price, discount, quantity }) => ({ moduleId, price, discount, quantity }))
+          items: includedItems.map(({ moduleId, price, discount, quantity }) => ({ moduleId, price, discount, quantity }))
         },
         client,
         company: structuredClone(state.company),
@@ -1016,8 +1093,10 @@ async function generateQuotePdf(kind = 'customer') {
         showPdfProgress('Unisco le pagine dei moduli…');
         const supplierBuilder = frame.contentWindow?.buildSupplierPdfDocument;
         if (typeof supplierBuilder !== 'function') throw new Error('Generatore PDF fornitore non disponibile.');
-        bytes = await supplierBuilder(modulePdfs, quote.number, client.name || client.company || '');
+        const forbiddenValues = [client.name, client.company, client.taxCode, client.vatNumber, client.address, client.email, client.phone].filter(value => String(value || '').trim().length >= 4);
+        bytes = await supplierBuilder(modulePdfs, { id: quote.id, revision: payload.quote.revision, kind, number: quote.number, recipient, moduleIds: includedItems.map(item => item.id), forbiddenValues });
       }
+      if (JSON.stringify(getQuote()) !== quoteSnapshot) throw new Error('Il preventivo è cambiato durante la generazione. Rigenera il PDF aggiornato.');
       generatedPdfBytes = bytes;
       generatedPdfKind = kind;
       const blob = new Blob([bytes], { type: 'application/pdf' });
@@ -1032,8 +1111,10 @@ async function generateQuotePdf(kind = 'customer') {
         showPdfProgress('Salvo il PDF nella cartella configurata…');
         const base64 = bytesToBase64(bytes);
         const prefix = kind === 'customer' ? 'cliente' : 'fornitore';
-        const saved = await desktopBridge.write_pdf(kind, `preventivo_${quote.number}_${prefix}.pdf`, base64);
+        const identity = { quote_id: quote.id, revision: payload.quote.revision, kind, recipient, module_ids: kind === 'supplier' ? includedItems.map(item => item.id) : [], forbidden_values: kind === 'supplier' ? [client.name, client.company, client.taxCode, client.vatNumber, client.address, client.email, client.phone].filter(value => String(value || '').trim().length >= 4) : [] };
+        const saved = await desktopBridge.write_pdf(kind, `preventivo_${quote.id}_${payload.quote.revision.slice(0, 12)}_${prefix}.pdf`, base64, identity);
         savedPdfPath = saved.path;
+        savedPdfReceipt = saved.receipt;
         showToast(`PDF ${prefix} salvato: ${saved.path}`);
       } else {
         showToast(`Anteprima PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} pronta.`);
@@ -1058,7 +1139,14 @@ async function generateQuotePdf(kind = 'customer') {
       button.disabled = button.dataset.kind === 'customer' ? !storagePaths.customer_pdf_dir : !storagePaths.supplier_pdf_dir;
     });
   }
-  return savedPdfPath ? { path: savedPdfPath, kind } : null;
+  return savedPdfPath ? { path: savedPdfPath, kind, revision: await quoteRevision(quoteSnapshot), moduleIds: kind === 'supplier' ? includedItems.map(item => item.id) : [], receipt: savedPdfReceipt } : null;
+}
+
+async function quoteRevision(serializedQuote) {
+  if (!window.crypto?.subtle) throw new Error('Impossibile verificare la revisione del preventivo: SHA-256 non disponibile.');
+  const bytes = new TextEncoder().encode(serializedQuote);
+  const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function bytesToBase64(bytes) {

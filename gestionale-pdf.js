@@ -8,6 +8,8 @@ window.buildQuotePdfDocument = async function (payload, modulePdfs) {
   pdf.setTitle(`Preventivo ${quote.number}`);
   pdf.setAuthor('CorradoWEB 2026');
   pdf.setCreator('CorradoWEB 2026');
+  if (!quote.id || !quote.revision || quote.kind !== 'customer') throw new Error('Identità del PDF cliente incompleta.');
+  pdf.setKeywords([`quote_id=${quote.id}`, `revision=${quote.revision}`, 'kind=customer', ...(quote.recipient ? [`recipient=${quote.recipient}`] : [])]);
   const regular = await pdf.embedFont(library.StandardFonts.Helvetica);
   const bold = await pdf.embedFont(library.StandardFonts.HelveticaBold);
   const color = library.rgb;
@@ -133,12 +135,14 @@ window.buildQuotePdfDocument = async function (payload, modulePdfs) {
   return pdf.save();
 };
 
-window.buildSupplierPdfDocument = async function (modulePdfs, quoteNumber, clientName) {
+window.buildSupplierPdfDocument = async function (modulePdfs, identity) {
   const library = window.PDFLib;
   if (!library?.PDFDocument) throw new Error('Libreria PDF non disponibile nel modulo originale.');
+  if (!identity?.id || !identity?.revision || identity.kind !== 'supplier' || !identity.number || !Array.isArray(identity.moduleIds) || !identity.moduleIds.length) throw new Error('Identità del PDF fornitore incompleta.');
   const pdf = await library.PDFDocument.create();
-  pdf.setTitle(`Moduli ${quoteNumber} - ${clientName}`);
-  pdf.setSubject(`Cliente: ${clientName} · Riferimento preventivo: ${quoteNumber}`);
+  pdf.setTitle(`Moduli fornitore ${identity.number}`);
+  pdf.setSubject(`Riferimento preventivo: ${identity.number}`);
+  pdf.setKeywords([`quote_id=${identity.id}`, `revision=${identity.revision}`, 'kind=supplier', ...(identity.recipient ? [`recipient=${identity.recipient}`] : []), `module_ids=${identity.moduleIds.join('|')}`]);
   pdf.setAuthor('CorradoWEB 2026');
   pdf.setCreator('CorradoWEB 2026');
   for (const moduleBytes of modulePdfs) {

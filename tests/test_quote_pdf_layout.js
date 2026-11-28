@@ -9,7 +9,7 @@ const pdfSource = fs.readFileSync(new URL('../gestionale-pdf.js', `file://${__di
 
 function makePdfHarness() {
   const pages = [];
-  const metadata = {};
+  const metadata = { keywords: [] };
   let textMeasureCalls = 0;
   const logoSize = { width: 2048, height: 2048 };
   const regular = {
@@ -24,6 +24,7 @@ function makePdfHarness() {
     setSubject(value) { metadata.subject = value; },
     setAuthor(value) { metadata.author = value; },
     setCreator(value) { metadata.creator = value; },
+    setKeywords(value) { metadata.keywords = value; },
     embedFont: async () => regular,
     embedPng: async () => logoSize,
     embedJpg: async () => logoSize,
@@ -72,6 +73,7 @@ const payload = {
   },
   client: { name: 'Cliente Demo', company: 'Cliente S.r.l.', address: 'Via Verdi 5', postalCode: '60025', city: 'Loreto', province: 'AN', email: 'cliente@example.it', phone: '' },
   quote: {
+    id: 'quote-42', revision: 'a'.repeat(64), kind: 'customer',
     number: 'PREV-2026-0042', createdAt: '2026-11-12', validityDays: 30, vatRate: 22, notes: 'Installazione inclusa.',
     items: [{ moduleId: 'tenda', quantity: 2, price: 1250, discount: 10 }]
   },
@@ -143,15 +145,15 @@ test('PDF cliente: una nota di un milione di caratteri viene accorciata rapidame
   assert.ok(harness.pages[0].drawTextCalls.some(call => call.text.startsWith('NOTE: X') && call.text.endsWith('...')));
 });
 
-test('PDF fornitore: conserva cliente e riferimento senza metadati commerciali', async () => {
+test('PDF fornitore: esclude dati cliente e associa identificativo, revisione e tipologia', async () => {
   const harness = makePdfHarness();
 
-  await harness.window.buildSupplierPdfDocument([], 'PREV-2026-0042', 'Cliente Riservato');
+  await harness.window.buildSupplierPdfDocument([], { id: 'quote-42', revision: 'b'.repeat(64), kind: 'supplier', number: 'PREV-2026-0042', recipient: '393331234567', moduleIds: ['item-7'] });
 
   assert.equal(harness.metadata.author, 'CorradoWEB 2026');
   assert.equal(harness.metadata.creator, 'CorradoWEB 2026');
-  assert.match(harness.metadata.title, /Cliente Riservato/);
-  assert.match(harness.metadata.subject, /Cliente Riservato/);
+  assert.doesNotMatch(harness.metadata.title + harness.metadata.subject, /Cliente Riservato/i);
   assert.match(harness.metadata.subject, /PREV-2026-0042/);
   assert.doesNotMatch(harness.metadata.title + harness.metadata.subject, /\b(?:totale|prezzo|€)\b/i);
+  assert.deepEqual(Array.from(harness.metadata.keywords), ['quote_id=quote-42', `revision=${'b'.repeat(64)}`, 'kind=supplier', 'recipient=393331234567', 'module_ids=item-7']);
 });

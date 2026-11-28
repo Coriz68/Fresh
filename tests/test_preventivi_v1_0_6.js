@@ -40,7 +40,7 @@ test('legacy storage and installer identity identifiers stay stable', () => {
   assert.match(installer, /DefaultDirName=\{autopf\}\\Gestionale Preventivi/);
 });
 
-test('upgrade configuration is consistently 1.0.6, preserves install paths, and documents Windows checks', () => {
+test('upgrade configuration is consistently 1.0.7, preserves install paths, and documents WhatsApp checks', () => {
   const installer = fs.readFileSync(new URL('../packaging/windows/GestionalePreventivi.iss', `file://${__dirname}/`), 'utf8');
   const versionInfo = fs.readFileSync(new URL('../packaging/windows/version_info.txt', `file://${__dirname}/`), 'utf8');
   const workflow = fs.readFileSync(new URL('../.github/workflows/windows-installer.yml', `file://${__dirname}/`), 'utf8');
@@ -50,18 +50,18 @@ test('upgrade configuration is consistently 1.0.6, preserves install paths, and 
     fs.readFileSync(new URL('../Istruzioni_gestionale.txt', `file://${__dirname}/`), 'utf8')
   ];
 
-  assert.match(installer, /AppVersion "1\.0\.6"/);
+  assert.match(installer, /AppVersion "1\.0\.7"/);
   assert.match(installer, /DefaultDirName=\{autopf\}\\Gestionale Preventivi/);
   assert.match(installer, /Flags: ignoreversion/);
-  assert.match(versionInfo, /filevers=\(1, 0, 6, 0\)/);
-  assert.match(versionInfo, /ProductVersion', '1\.0\.6'/);
-  assert.match(workflow, /Gestionale-Preventivi-1\.0\.6-Windows-x64/);
+  assert.match(versionInfo, /filevers=\(1, 0, 7, 0\)/);
+  assert.match(versionInfo, /ProductVersion', '1\.0\.7'/);
+  assert.match(workflow, /Gestionale-Preventivi-1\.0\.7-Windows-x64/);
   assert.match(workflow, /-Filter \*\.html\)\.Count -ne 32/);
-  assert.match(instructions, /Gestionale Preventivi 1\.0\.6 Setup\.exe/);
+  assert.match(instructions, /Gestionale Preventivi 1\.0\.7 Setup\.exe/);
   assert.match(instructions, /aggiornamento in-place dalla 1\.0\.5/i);
   assert.match(instructions, /non introduce un updater automatico/i);
   assert.match(instructions, /Windows 10\/11/);
-  assert.ok(manuals.every(text => /1\.0\.6/.test(text)));
+  assert.ok(manuals.every(text => /1\.0\.7/.test(text)));
 });
 
 function runPhoneNormalizer(value) {
@@ -183,27 +183,34 @@ test('customer and supplier send timestamps are independent', async () => {
   assert.equal(quote.sentSupplierAt, null);
 });
 
-test('opening the selected PDF for Windows Share does not mark a quote sent', async () => {
+test('preparing a WhatsApp PDF does not mark a quote sent', async () => {
   const share = extractFunction('shareQuotePdfViaWhatsApp');
   const instructions = extractFunction('setPdfShareInstructions');
   assert.ok(share, 'Il flusso WhatsApp del preventivo deve esistere.');
-  const quote = { sentCustomerAt: null, sentSupplierAt: null };
+  const quote = { id: 'q1', sentCustomerAt: null, sentSupplierAt: null };
   const bridgeCalls = [];
   const toasts = [];
   const shareInstructions = { textContent: '', hidden: true };
   const sandbox = {
-    desktopBridge: { reveal_pdf_in_explorer: async (...args) => { bridgeCalls.push(args); } },
+    desktopBridge: {
+      open_whatsapp_chat: async (...args) => { bridgeCalls.push(['open', ...args]); },
+      prepare_whatsapp_pdf: async (...args) => { bridgeCalls.push(['attach', ...args]); return { attached: true, filename: 'quote.pdf' }; }
+    },
     document: { querySelector: selector => selector === '#pdfShareInstructions' ? shareInstructions : null },
     getQuote: () => quote,
-    generateQuotePdf: async () => ({ path: 'C:/pdf/quote.pdf' }),
+    activeClient: () => ({ phone: '3331234567' }),
+    normalizePhoneNumber: value => ({ value: `+39${value}`, valid: true }),
+    quoteRevision: async () => 'a'.repeat(64),
+    window: { confirm: () => true, prompt: () => '3337654321' },
+    generateQuotePdf: async () => ({ path: 'C:/pdf/quote.pdf', revision: 'a'.repeat(64), receipt: { path: 'C:/pdf/quote.pdf', sha256: 'b'.repeat(64) } }),
     showToast: message => toasts.push(message)
   };
   vm.runInNewContext(`${instructions}\n${share}\nthis.shareQuotePdfViaWhatsApp = shareQuotePdfViaWhatsApp;`, sandbox);
 
   await sandbox.shareQuotePdfViaWhatsApp('customer');
 
-  assert.deepEqual(bridgeCalls, [['customer', 'C:/pdf/quote.pdf']]);
-  assert.match(toasts[0], /Condividi.*WhatsApp/);
+  assert.equal(JSON.stringify(bridgeCalls), JSON.stringify([['open', '393331234567'], ['attach', 'customer', 'C:/pdf/quote.pdf', '393331234567', 'q1', 'a'.repeat(64), [], { path: 'C:/pdf/quote.pdf', sha256: 'b'.repeat(64) }]]));
+  assert.match(toasts[0], /Non è stato inviato/);
   assert.equal(shareInstructions.hidden, false);
   assert.equal(quote.sentCustomerAt, null);
   assert.equal(quote.sentSupplierAt, null);
@@ -266,7 +273,7 @@ test('quote list shows independent PDF send statuses', () => {
   assert.match(markup, /Non inviato/);
 });
 
-test('supplier module data retains client name and existing module data', () => {
+test('supplier module data keeps schema technical fields and removes identity, notes and installation fields', () => {
   const mapper = extractFunction('quoteModuleData');
   assert.ok(mapper, 'Il flusso di preparazione dei moduli deve separare i dati per destinazione PDF.');
   const sandbox = {
@@ -274,17 +281,55 @@ test('supplier module data retains client name and existing module data', () => 
     quoteModuleData: undefined
   };
   vm.runInNewContext(`${mapper}\nthis.quoteModuleData = quoteModuleData;`, sandbox);
-  const originalData = { larghezza: 300, cliente: 'Dato legacy' };
+  const originalData = { larghezza: 300, cliente: 'Dato legacy', note: 'riservate', installazioneParete: 'si', prezzo: 1234, sceltaTecnica: 'RAL 9010' };
   const client = { name: 'Cliente Riservato', company: 'Riservata S.r.l.' };
   const quote = { number: 'PREV-2026-0001' };
 
-  const supplier = sandbox.quoteModuleData('supplier', originalData, client, quote);
+  const schemaFields = [
+    { id: 'larghezza', label: 'Larghezza' }, { id: 'cliente', label: 'Cliente' },
+    { id: 'note', label: 'Note' }, { id: 'installazioneParete', label: 'Installazione parete' },
+    { id: 'sceltaTecnica', label: 'Colore struttura' }
+  ];
+  const supplier = sandbox.quoteModuleData('supplier', originalData, client, quote, schemaFields);
   const customer = sandbox.quoteModuleData('customer', originalData, client, quote);
 
-  assert.equal(supplier.cliente, 'Cliente Riservato');
+  assert.equal(supplier.cliente, undefined);
+  assert.equal(supplier.note, undefined);
+  assert.equal(supplier.installazioneParete, undefined);
+  assert.equal(supplier.prezzo, undefined);
+  assert.equal(supplier.larghezza, 300);
+  assert.equal(supplier.sceltaTecnica, 'RAL 9010');
   assert.equal(supplier.riferimento, quote.number);
   assert.equal(customer.cliente, 'Cliente Riservato');
-  assert.deepEqual(JSON.parse(JSON.stringify(originalData)), { larghezza: 300, cliente: 'Dato legacy' });
+  assert.deepEqual(JSON.parse(JSON.stringify(originalData)), { larghezza: 300, cliente: 'Dato legacy', note: 'riservate', installazioneParete: 'si', prezzo: 1234, sceltaTecnica: 'RAL 9010' });
+  assert.throws(() => sandbox.quoteModuleData('supplier', { riferimento: 'Cliente Riservato' }, client, quote, [{ id: 'riferimento' }]), /dati anagrafici del cliente/);
+});
+
+test('all 32 module schemas exclude private and installation data while retaining technical fields', () => {
+  const mapper = extractFunction('quoteModuleData');
+  const sandbox = { structuredClone, quoteModuleData: undefined };
+  vm.runInNewContext(`${mapper}\nthis.quoteModuleData = quoteModuleData;`, sandbox);
+  const directory = new URL('../Moduli/', `file://${__dirname}/`);
+  const moduleFiles = fs.readdirSync(directory).filter(file => file.endsWith('.html'));
+  assert.equal(moduleFiles.length, 32);
+  const privateKey = /cliente|client|note|prezz|cost|scont|import|totale|installaz|commercial|email|telefono|indirizzo|ragione|vat|fiscal/i;
+  for (const file of moduleFiles) {
+    const html = fs.readFileSync(new URL(file, directory), 'utf8');
+    const rawSchema = html.match(/<script[^>]*id="schema"[^>]*>(.*?)<\/script>/s)?.[1];
+    assert.ok(rawSchema, `${file}: schema non disponibile`);
+    const schema = JSON.parse(rawSchema);
+    const technical = schema.fields.find(field => !privateKey.test(`${field.id} ${field.key || ''}`));
+    assert.ok(technical, `${file}: nessun campo tecnico verificabile`);
+    const technicalKey = technical.key || technical.id;
+    const data = Object.fromEntries(schema.fields.flatMap(field => [[field.id, 'valore'], ...(field.key ? [[field.key, 'valore']] : [])]));
+    data.cliente = 'Cliente Riservato';
+    data.note = 'Nota riservata';
+    const supplier = JSON.parse(JSON.stringify(sandbox.quoteModuleData('supplier', data, { name: 'Cliente Riservato' }, { number: 'PREV-42' }, schema.fields)));
+    for (const key of Object.keys(supplier)) assert.ok(!privateKey.test(key), `${file}: campo riservato ${key}`);
+    assert.equal(supplier[technicalKey], 'valore', `${file}: campo tecnico ${technicalKey} deve essere mantenuto`);
+    assert.equal(supplier.cliente, undefined);
+    assert.equal(supplier.note, undefined);
+  }
 });
 
 test('duplicateQuote preserves quote data with a new identity', () => {

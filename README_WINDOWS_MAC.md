@@ -1,6 +1,6 @@
-# Gestionale preventivi — versione 1.0.6 · CorradoWEB 2026
+# Gestionale preventivi — versione 1.0.7 · CorradoWEB 2026
 
-Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0.6 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
+Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0.7 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
 
 ## Requisiti
 
@@ -37,10 +37,10 @@ In **Azienda e PDF** seleziona una cartella database e due cartelle PDF diverse.
 - **Genera PDF fornitore · soli moduli** assembla solo le pagine dei moduli, senza riepilogo commerciale o prezzi.
 - In entrambe le uscite, i moduli riportano il nome del cliente e il riferimento del preventivo.
 - I file vengono messi nelle rispettive cartelle. Le collisioni di nome ricevono un suffisso numerico, senza sovrascrivere i PDF esistenti.
-- I pulsanti WhatsApp generano e salvano il PDF corretto, poi aprono Esplora file con quel documento selezionato. Scegli **Condividi > WhatsApp**, seleziona e verifica il destinatario e l’allegato, quindi invia manualmente. Se WhatsApp non compare tra le destinazioni, allega il PDF dalla cartella configurata. L’app non avvia WhatsApp, non modifica gli appunti e non invia messaggi automaticamente. Conferma in seguito l’invio nell’app per registrare la data. Su macOS la condivisione resta manuale.
+- I pulsanti WhatsApp generano e salvano un PDF associato a preventivo, revisione e tipologia, aprono la chat al numero scelto e preparano l’allegato dopo conferma del destinatario. Il messaggio resta in bozza: controllalo e invia manualmente. La registrazione dell’invio richiede una conferma separata nell’app. Su macOS la condivisione resta manuale.
 - In caso di problemi, il registro tecnico locale si trova in `logs/app.log` nella cartella dati dell’applicazione. Contiene fasi e tempi, senza contenuti dei preventivi.
 
-All’avvio della versione 1.0.6 l’archivio esistente viene salvato in una copia di sicurezza prima dell’aggiunta dei campi di stato invio. Se non è possibile creare la copia, l’archivio originale resta invariato e l’avvio segnala l’errore. Esporta periodicamente un backup JSON e custodiscilo separatamente dal computer. Il database non è cifrato.
+Nell’aggiornamento da 1.0.5 a 1.0.6 l’archivio esistente viene salvato in una copia di sicurezza prima dell’aggiunta dei campi di stato invio. Le versioni successive preservano gli stessi dati locali. Esporta periodicamente un backup JSON e custodiscilo separatamente dal computer. Il database non è cifrato.
 
 ## Verifiche
 

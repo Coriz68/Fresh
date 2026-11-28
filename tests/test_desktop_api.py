@@ -119,9 +119,66 @@ class DesktopApiTests(unittest.TestCase):
         self.assertFalse(hasattr(self.api, "window"))
         self.assertEqual(set(dir(self.api)), DesktopApi.EXPOSED_METHODS)
 
-    def test_legacy_whatsapp_launch_and_attachment_automation_are_not_exposed(self):
-        self.assertNotIn("open_whatsapp", DesktopApi.EXPOSED_METHODS)
-        self.assertNotIn("attach_whatsapp_pdf", DesktopApi.EXPOSED_METHODS)
+    def test_whatsapp_methods_are_narrowly_exposed_with_existing_store_hidden(self):
+        self.assertIn("open_whatsapp_chat", DesktopApi.EXPOSED_METHODS)
+        self.assertIn("copy_whatsapp_pdf_clipboard", DesktopApi.EXPOSED_METHODS)
+        self.assertIn("prepare_whatsapp_pdf", DesktopApi.EXPOSED_METHODS)
+        self.assertFalse(hasattr(self.api, "store"))
+
+    def test_prepare_whatsapp_pdf_checks_folder_name_and_passes_exact_identity(self):
+        customer_dir = self.root / "pdf cliente"
+        customer_dir.mkdir()
+        self.store.set_output_folder("customer", customer_dir)
+        revision = "a" * 64
+        pdf_path = customer_dir / f"preventivo_quote-42_{revision[:12]}_cliente.pdf"
+        pdf_path.write_bytes(b"%PDF-1.7 fake")
+        receipt = {"path": str(pdf_path.resolve())}
+        with patch("whatsapp_windows.prepare_whatsapp_pdf", return_value={"attached": True}) as prepare:
+            result = self.api.prepare_whatsapp_pdf("customer", str(pdf_path), "393331234567", "quote-42", revision, [], receipt, platform_name="nt")
+        self.assertEqual(result, {"attached": True})
+        prepare.assert_called_once_with(str(pdf_path.resolve()), "customer", "393331234567", "quote-42", revision, [], receipt, platform_name="nt")
+
+    def test_prepare_whatsapp_pdf_rejects_a_different_revision_or_type_filename(self):
+        customer_dir = self.root / "pdf cliente"
+        customer_dir.mkdir()
+        self.store.set_output_folder("customer", customer_dir)
+        stale = customer_dir / "preventivo_quote-42_000000000000_cliente.pdf"
+        stale.write_bytes(b"%PDF-1.7 fake")
+        with self.assertRaisesRegex(ValueError, "revisione"):
+            self.api.prepare_whatsapp_pdf("customer", str(stale), "393331234567", "quote-42", "a" * 64, [], platform_name="nt")
+
+    def test_prepare_whatsapp_pdf_rejects_a_pdf_from_a_different_quote(self):
+        customer_dir = self.root / "pdf cliente"
+        customer_dir.mkdir()
+        self.store.set_output_folder("customer", customer_dir)
+        revision = "a" * 64
+        other_quote = customer_dir / f"preventivo_quote-41_{revision[:12]}_cliente.pdf"
+        other_quote.write_bytes(b"%PDF-1.7 fake")
+        with self.assertRaisesRegex(ValueError, "preventivo, revisione e tipologia"):
+            self.api.prepare_whatsapp_pdf("customer", str(other_quote), "393331234567", "quote-42", revision, [], {"path": str(other_quote.resolve())}, platform_name="nt")
+
+    def test_write_pdf_returns_a_verified_receipt_for_generated_quote_documents(self):
+        customer_dir = self.root / "pdf cliente"
+        customer_dir.mkdir()
+        self.store.set_output_folder("customer", customer_dir)
+        payload = base64.b64encode(b"%PDF-1.7 fake").decode("ascii")
+        identity = {"quote_id": "quote-42", "revision": "a" * 64, "kind": "customer", "recipient": "393331234567", "module_ids": [], "forbidden_values": []}
+        receipt = {"quote_id": "quote-42", "revision": "a" * 64, "kind": "customer", "recipient": "393331234567", "sha256": "b" * 64, "size": 20, "pages": 1}
+        with patch("whatsapp_windows.create_pdf_receipt", return_value=receipt) as create_receipt:
+            result = self.api.write_pdf("customer", "quote.pdf", payload, identity)
+        create_receipt.assert_called_once_with(result["path"], identity)
+        self.assertEqual(result["receipt"], receipt)
+
+    def test_write_pdf_removes_a_generated_document_that_fails_identity_validation(self):
+        customer_dir = self.root / "pdf cliente"
+        customer_dir.mkdir()
+        self.store.set_output_folder("customer", customer_dir)
+        payload = base64.b64encode(b"%PDF-1.7 fake").decode("ascii")
+        identity = {"quote_id": "quote-42", "revision": "a" * 64, "kind": "customer"}
+        with patch("whatsapp_windows.create_pdf_receipt", side_effect=ValueError("metadati errati")):
+            with self.assertRaisesRegex(ValueError, "metadati errati"):
+                self.api.write_pdf("customer", "quote.pdf", payload, identity)
+        self.assertEqual(list(customer_dir.glob("*.pdf")), [])
 
     def test_reveal_pdf_in_explorer_selects_valid_customer_pdf_in_configured_folder(self):
         customer_dir = self.root / "pdf cliente"
