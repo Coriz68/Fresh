@@ -1,6 +1,6 @@
-# Gestionale preventivi — versione 1.0.10 · CorradoWEB 2026
+# Gestionale preventivi — versione 1.0.11 · CorradoWEB 2026
 
-Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0.10 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
+Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0.11 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
 
 ## Requisiti
 

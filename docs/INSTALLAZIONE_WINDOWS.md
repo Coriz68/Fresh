@@ -1,4 +1,4 @@
-# Gestionale Preventivi 1.0.10 — CorradoWEB 2026 — installazione Windows
+# Gestionale Preventivi 1.0.11 — CorradoWEB 2026 — installazione Windows
 
 ## Requisiti
 
@@ -8,18 +8,18 @@
 
 ## Installazione
 
-1. Scarica `Gestionale Preventivi 1.0.10 Setup.exe` e `SHA256SUMS.txt` dall'artefatto Windows x64 della build.
+1. Scarica `Gestionale Preventivi 1.0.11 Setup.exe` e `SHA256SUMS.txt` dall'artefatto Windows x64 della build.
 2. Confronta l'hash SHA-256 del setup con quello riportato nel file.
 3. Avvia il setup. Windows può segnalare che l'app è di un autore sconosciuto: l'eseguibile non è firmato digitalmente.
 4. Segui la procedura guidata e avvia il gestionale dal menu Start.
 
 Il setup installa il programma in Program Files e crea la voce di disinstallazione di Windows. Database, impostazioni e PDF restano nelle cartelle locali configurate dall'utente, fuori dalla cartella del programma; aggiornamento e disinstallazione non rimuovono i dati. L’aggiornamento dalla 1.0.5 alla 1.0.6 ha creato una copia byte per byte dell’archivio prima della migrazione; le versioni successive mantengono il database esistente. L’aggiornamento non introduce un updater automatico.
 
-Per l'aggiornamento in-place dalla 1.0.5, avvia il setup 1.0.10 sul computer che contiene già la versione precedente e mantieni le cartelle dati esistenti. Prima dell'uso verifica l'avvio, il preventivo esistente e i PDF salvati. Questa sequenza va collaudata su Windows 10/11 reale prima di distribuire l'installer.
+Per l'aggiornamento in-place dalla 1.0.5, avvia il setup 1.0.11 sul computer che contiene già la versione precedente e mantieni le cartelle dati esistenti. Prima dell'uso verifica l'avvio, il preventivo esistente e i PDF salvati. Questa sequenza va collaudata su Windows 10/11 reale prima di distribuire l'installer.
 
 ## Allegare un PDF a WhatsApp
 
-La versione 1.0.10 avvia il collegamento WhatsApp tramite l'associazione protocolli di Windows (ShellExecuteW), senza passare dal browser predefinito, e attende una finestra WhatsApp Desktop visibile e attiva prima di chiedere conferma. Riconosce sia l'app classica sia quella Microsoft Store tramite AppUserModelID. Se l'avvio o il riconoscimento falliscono, mostra un avviso persistente con il dettaglio, mantiene il PDF corretto negli appunti e non dichiara WhatsApp avviato. Per l'associazione del protocollo controlla Impostazioni > App > App predefinite > Protocolli > WHATSAPP.
+La versione 1.0.11 prova prima ad attivare direttamente WhatsApp Microsoft Store con l'API Windows IApplicationActivationManager e il suo AppUserModelID; poi apre la chat col protocollo WhatsApp. Per l'app classica usa il collegamento whatsapp:// registrato in Windows. Attende una finestra WhatsApp visibile e attiva e riconosce anche la finestra ospitata da ApplicationFrameHost.exe. Se il protocollo della chat non è associato ma l'app Store si avvia, l'avviso resta aperto, il PDF corretto rimane negli appunti e puoi aprire manualmente la chat prima di premere Ctrl+V. Il gestionale non dichiara invio o allegato verificato in quel caso.
 
 I pulsanti WhatsApp generano e salvano un PDF identificato da preventivo, revisione e tipologia. Il gestionale apre WhatsApp sul numero cliente oppure chiede il numero del fornitore e quali moduli tecnici sono pertinenti; richiede conferma visiva del destinatario e prepara l’allegato con Ctrl+V. Controlla nome del file e destinatario nella bozza; il gestionale non preme **Invia**. Gli appunti contengono il percorso esatto del solo PDF selezionato. Se l’allegato non è verificabile, il PDF corretto resta negli appunti per l’allegato manuale.
 
@@ -29,6 +29,6 @@ La verifica automatica copre identità e revisione PDF, privacy del PDF fornitor
 
 ## Ottenere il pacchetto
 
-La build si esegue su GitHub Actions Windows x64. Apri l'esecuzione completata del workflow **Windows installer 1.0** e scarica l'artefatto `Gestionale-Preventivi-1.0.10-Windows-x64`. L'artefatto contiene il setup, il checksum e queste istruzioni.
+La build si esegue su GitHub Actions Windows x64. Apri l'esecuzione completata del workflow **Windows installer 1.0** e scarica l'artefatto `Gestionale-Preventivi-1.0.11-Windows-x64`. L'artefatto contiene il setup, il checksum e queste istruzioni.
 
 Per distribuire un setup, verifica anche l'installazione e l'avvio su un computer Windows 10/11 reale. L'hash rileva modifiche accidentali, ma non sostituisce una firma digitale.

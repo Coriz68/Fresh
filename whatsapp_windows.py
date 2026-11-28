@@ -74,6 +74,57 @@ def _guid(value: str) -> _Guid:
     return _Guid(parsed.time_low, parsed.time_mid, parsed.time_hi_version, tail)
 
 
+def _activate_store_whatsapp() -> int:
+    """Launch Store WhatsApp directly through the Windows activation manager."""
+    ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+    ole32.CoInitializeEx.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+    ole32.CoInitializeEx.restype = ctypes.c_long
+    initialize_result = int(ole32.CoInitializeEx(None, 2))  # COINIT_APARTMENTTHREADED
+    initialized_here = initialize_result >= 0
+    if initialize_result < 0 and (initialize_result & 0xFFFFFFFF) != 0x80010106:  # RPC_E_CHANGED_MODE
+        raise RuntimeError(f"COM non disponibile per l’avvio WhatsApp (0x{initialize_result & 0xFFFFFFFF:08X}).")
+
+    activation_manager = ctypes.c_void_p()
+    vtable = None
+    try:
+        ole32.CoCreateInstance.argtypes = [
+            ctypes.POINTER(_Guid),
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            ctypes.POINTER(_Guid),
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        ole32.CoCreateInstance.restype = ctypes.c_long
+        clsid = _guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")
+        iid = _guid("2E941141-7F97-4756-BA1D-9DECDE894A3D")
+        result = int(ole32.CoCreateInstance(ctypes.byref(clsid), None, 4, ctypes.byref(iid), ctypes.byref(activation_manager)))
+        if result < 0 or not activation_manager.value:
+            raise RuntimeError(f"Windows non ha attivato WhatsApp Store (0x{result & 0xFFFFFFFF:08X}).")
+        vtable = ctypes.cast(
+            activation_manager,
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)),
+        ).contents
+        activate = ctypes.WINFUNCTYPE(
+            ctypes.c_long,
+            ctypes.c_void_p,
+            wintypes.LPCWSTR,
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+        )(vtable[3])
+        process_id = wintypes.DWORD()
+        result = int(activate(activation_manager, _WHATSAPP_APP_USER_MODEL_ID, None, 0, ctypes.byref(process_id)))
+        if result < 0:
+            raise RuntimeError(f"Windows non ha avviato WhatsApp Store (0x{result & 0xFFFFFFFF:08X}).")
+        return int(process_id.value)
+    finally:
+        if vtable is not None:
+            release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtable[2])
+            release(activation_manager)
+        if initialized_here:
+            ole32.CoUninitialize()
+
+
 def _windows_app_user_model_id(window: Any) -> str:
     """Read the shell AppUserModelID used by Microsoft Store-hosted windows."""
     if os.name != "nt":
@@ -351,13 +402,24 @@ def open_whatsapp_chat(
         raise RuntimeError("WhatsApp Desktop è disponibile solo su Windows.")
     if not phone.isdigit() or not 8 <= len(phone) <= 15:
         raise ValueError("Numero WhatsApp non valido.")
-    result = _shell_execute_protocol(f"whatsapp://send?phone={phone}")
-    if result <= 32:
+    uri = f"whatsapp://send?phone={phone}"
+    store_activation_error = None
+    try:
+        process_id = _activate_store_whatsapp()
+    except Exception as error:
+        process_id = 0
+        store_activation_error = error
+    result = _shell_execute_protocol(uri)
+    if result <= 32 and not process_id:
         raise RuntimeError(
-            "Windows non riesce ad avviare WhatsApp: il protocollo WhatsApp non è associato "
-            f"a un’app Desktop (codice {result}). Installa/aggiorna WhatsApp Desktop e controlla "
-            "App predefinite > Protocolli > WHATSAPP."
+            "Windows non riesce ad avviare WhatsApp: nessuna app Store attivabile e il protocollo "
+            f"WhatsApp non è associato (codice {result}; dettaglio Store: {store_activation_error}). "
+            "Installa/aggiorna WhatsApp Desktop e controlla App predefinite > Protocolli > WHATSAPP."
         )
+    chat_protocol_error = (
+        f"Windows non riesce ad aprire la chat tramite il protocollo WhatsApp (codice {result})."
+        if result <= 32 and process_id else None
+    )
     if desktop_factory is None:
         try:
             from pywinauto import Desktop
@@ -385,7 +447,19 @@ def open_whatsapp_chat(
         window.set_focus()
         _wait(lambda: window.is_active(), timeout, "focus della finestra WhatsApp")
     except Exception as error:
-        raise RuntimeError(f"Windows ha accettato il collegamento, ma non riesco a verificare l’avvio di WhatsApp Desktop: {error}") from error
+        if process_id:
+            raise RuntimeError(
+                "Windows ha richiesto l’attivazione diretta di WhatsApp Store, ma non è comparsa "
+                f"una finestra WhatsApp verificabile. Protocollo chat: {result}; errore: {error}"
+            ) from error
+        raise RuntimeError(
+            f"Windows ha accettato il collegamento, ma non riesco a verificare l’avvio di WhatsApp Desktop: {error}"
+        ) from error
+    if chat_protocol_error:
+        raise RuntimeError(
+            "WhatsApp Desktop è aperto, ma non è possibile aprire automaticamente la chat. "
+            f"{chat_protocol_error} Seleziona manualmente il destinatario e incolla il PDF."
+        )
     return {"ok": True}
 
 

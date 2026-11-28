@@ -104,7 +104,7 @@ class WhatsAppClipboardTests(unittest.TestCase):
             )
 
     def test_open_whatsapp_dispatches_protocol_through_windows_shell(self):
-        with patch.object(whatsapp, "_shell_execute_protocol", return_value=42) as launch, patch.object(whatsapp, "_windows_process_name", return_value="whatsapp.exe"):
+        with patch.object(whatsapp, "_activate_store_whatsapp", side_effect=RuntimeError("non è Store")), patch.object(whatsapp, "_shell_execute_protocol", return_value=42) as launch, patch.object(whatsapp, "_windows_process_name", return_value="whatsapp.exe"):
             result = whatsapp.open_whatsapp_chat(
                 "393331234567",
                 platform_name="nt",
@@ -127,7 +127,7 @@ class WhatsAppClipboardTests(unittest.TestCase):
     def test_open_whatsapp_recognizes_the_microsoft_store_app_window_identity(self):
         store_window = FakeWindow()
         app_id = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"
-        with patch.object(whatsapp, "_shell_execute_protocol", return_value=42):
+        with patch.object(whatsapp, "_activate_store_whatsapp", return_value=1234) as activate, patch.object(whatsapp, "_shell_execute_protocol", return_value=42) as launch:
             result = whatsapp.open_whatsapp_chat(
                 "393331234567",
                 platform_name="nt",
@@ -136,6 +136,32 @@ class WhatsAppClipboardTests(unittest.TestCase):
                 app_user_model_id_resolver=lambda window: app_id,
             )
         self.assertEqual(result, {"ok": True})
+        activate.assert_called_once_with()
+        launch.assert_called_once_with("whatsapp://send?phone=393331234567")
+        self.assertTrue(store_window.active)
+
+    def test_open_whatsapp_uses_protocol_fallback_for_classic_installation(self):
+        with patch.object(whatsapp, "_activate_store_whatsapp", side_effect=RuntimeError("Store app non installata")), patch.object(whatsapp, "_shell_execute_protocol", return_value=42) as launch, patch.object(whatsapp, "_windows_process_name", return_value="whatsapp.exe"):
+            result = whatsapp.open_whatsapp_chat(
+                "393331234567",
+                platform_name="nt",
+                desktop_factory=lambda **kwargs: FakeDesktop([self.window]),
+            )
+        self.assertEqual(result, {"ok": True})
+        launch.assert_called_once_with("whatsapp://send?phone=393331234567")
+
+    def test_store_app_stays_open_when_chat_protocol_is_missing(self):
+        store_window = FakeWindow()
+        app_id = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"
+        with patch.object(whatsapp, "_activate_store_whatsapp", return_value=1234), patch.object(whatsapp, "_shell_execute_protocol", return_value=31):
+            with self.assertRaisesRegex(RuntimeError, "WhatsApp Desktop è aperto"):
+                whatsapp.open_whatsapp_chat(
+                    "393331234567",
+                    platform_name="nt",
+                    desktop_factory=lambda **kwargs: FakeDesktop([store_window]),
+                    process_name_resolver=lambda window: "ApplicationFrameHost.exe",
+                    app_user_model_id_resolver=lambda window: app_id,
+                )
         self.assertTrue(store_window.active)
 
     def test_open_whatsapp_reports_missing_protocol_handler(self):
