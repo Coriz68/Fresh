@@ -26,7 +26,15 @@
   cursor: not-allowed;
 }
 
+#closeAppButton {
+  white-space: nowrap;
+}
+
 @media (max-width: 720px) {
+  .top-actions {
+    flex-wrap: wrap;
+  }
+
   .path-control {
     grid-template-columns: 1fr;
   }

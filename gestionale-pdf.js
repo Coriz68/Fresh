@@ -6,7 +6,10 @@ window.buildQuotePdfDocument = async function (payload, modulePdfs) {
   const { company, client, quote, models } = payload;
   const pdf = await library.PDFDocument.create();
   pdf.setTitle(`Preventivo ${quote.number}`);
-  pdf.setAuthor(pdfSafeText(company.name));
+  pdf.setAuthor('CorradoWEB 2026');
+  pdf.setCreator('CorradoWEB 2026');
+  if (!quote.id || !quote.revision || quote.kind !== 'customer') throw new Error('Identità del PDF cliente incompleta.');
+  pdf.setKeywords([`quote_id=${quote.id}`, `revision=${quote.revision}`, 'kind=customer', ...(quote.recipient ? [`recipient=${quote.recipient}`] : [])]);
   const regular = await pdf.embedFont(library.StandardFonts.Helvetica);
   const bold = await pdf.embedFont(library.StandardFonts.HelveticaBold);
   const color = library.rgb;
@@ -117,10 +120,7 @@ window.buildQuotePdfDocument = async function (payload, modulePdfs) {
       drawTopText(page, `Netto (IVA esclusa): ${money(totals.netTotal)}`, totalX + 12, totalsTop + 44, 8, bold, teal, 227);
       drawTopText(page, `IVA ${totals.vatRate}%: ${money(totals.vatTotal)}`, totalX + 12, totalsTop + 59, 8, regular, muted, 227);
       drawTopText(page, `TOTALE: ${money(totals.grossTotal)}`, totalX + 12, totalsTop + 74, 12, bold, teal, 227);
-      if (quote.notes) {
-        const noteLines = wrapPdfText(`NOTE: ${quote.notes}`, regular, 7, 490, Math.max(1, Math.floor((556 - totalsTop - 9) / 10)));
-        noteLines.forEach((line, index) => drawTopText(page, line, 36, totalsTop + 9 + index * 10, 7, regular, muted, 490));
-      }
+      if (quote.notes) drawTopText(page, `NOTE: ${quote.notes}`, 36, totalsTop + 9, 7, regular, muted, 490);
     }
     drawLine(page, 36, 566, width - 36);
     drawTopText(page, company.footerNotes || company.name, 36, 573, 7, regular, muted, 680);
@@ -135,12 +135,16 @@ window.buildQuotePdfDocument = async function (payload, modulePdfs) {
   return pdf.save();
 };
 
-window.buildSupplierPdfDocument = async function (modulePdfs, quoteNumber, clientName) {
+window.buildSupplierPdfDocument = async function (modulePdfs, identity) {
   const library = window.PDFLib;
   if (!library?.PDFDocument) throw new Error('Libreria PDF non disponibile nel modulo originale.');
+  if (!identity?.id || !identity?.revision || identity.kind !== 'supplier' || !identity.number || !Array.isArray(identity.moduleIds) || !identity.moduleIds.length) throw new Error('Identità del PDF fornitore incompleta.');
   const pdf = await library.PDFDocument.create();
-  pdf.setTitle(`Moduli ${quoteNumber} - ${clientName}`);
-  pdf.setSubject(`Cliente: ${clientName} · Riferimento preventivo: ${quoteNumber}`);
+  pdf.setTitle(`Moduli fornitore ${identity.number}`);
+  pdf.setSubject(`Riferimento preventivo: ${identity.number}`);
+  pdf.setKeywords([`quote_id=${identity.id}`, `revision=${identity.revision}`, 'kind=supplier', ...(identity.recipient ? [`recipient=${identity.recipient}`] : []), `module_ids=${identity.moduleIds.join('|')}`]);
+  pdf.setAuthor('CorradoWEB 2026');
+  pdf.setCreator('CorradoWEB 2026');
   for (const moduleBytes of modulePdfs) {
     const modulePdf = await library.PDFDocument.load(new Uint8Array(moduleBytes));
     const pages = await pdf.copyPages(modulePdf, modulePdf.getPageIndices());
@@ -151,39 +155,27 @@ window.buildSupplierPdfDocument = async function (modulePdfs, quoteNumber, clien
 };
 
 function pdfSafeText(value) {
-  // Le font standard (WinAnsi) non codificano i caratteri di controllo: un "a capo"
-  // nelle note faceva fallire l'intera generazione del PDF.
   return String(value ?? '')
-    .replace(/\s*[\r\n]+\s*/g, ' · ')
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
     .replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/…/g, '...')
-    .replace(/[^\u0020-\u00ff\u20ac]/g, '?');
-}
-
-function wrapPdfText(text, font, size, maxWidth, maxLines) {
-  const lines = [];
-  for (const paragraph of String(text ?? '').split(/\r\n|\r|\n/)) {
-    let line = '';
-    for (const word of pdfSafeText(paragraph).split(' ').filter(Boolean)) {
-      const candidate = line ? `${line} ${word}` : word;
-      if (!line || font.widthOfTextAtSize(candidate, size) <= maxWidth) line = candidate;
-      else {
-        lines.push(line);
-        line = word;
-      }
-    }
-    lines.push(line);
-  }
-  while (lines.length && !lines.at(-1)) lines.pop();
-  const kept = lines.slice(0, maxLines);
-  if (lines.length > maxLines) kept[maxLines - 1] += '...';
-  return kept.map(line => fitPdfText(line, font, size, maxWidth));
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '')
+    .replace(/[^\u0000-\u00ff\u20ac]/g, '?');
 }
 
 function fitPdfText(text, font, size, maxWidth) {
   let value = pdfSafeText(text);
-  while (value.length > 1 && font.widthOfTextAtSize(value, size) > maxWidth) value = `${value.slice(0, -2)}...`;
-  return value;
+  if (font.widthOfTextAtSize(value, size) <= maxWidth) return value;
+  const suffix = '...';
+  if (font.widthOfTextAtSize(suffix, size) > maxWidth) return '';
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const candidate = `${value.slice(0, middle).trimEnd()}${suffix}`;
+    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) low = middle;
+    else high = middle - 1;
+  }
+  return `${value.slice(0, low).trimEnd()}${suffix}`;
 }
 
 function money(value) {

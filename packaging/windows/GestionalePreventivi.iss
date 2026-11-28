@@ -1,16 +1,16 @@
 #define AppName "Gestionale Preventivi"
-#define AppVersion "1.0.2"
+#define AppVersion "1.0.16"
 #define AppExeName "GestionalePreventivi.exe"
 
 [Setup]
 AppId={{2A1F8B7C-0E51-48A1-965E-941B4C2376A0}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppPublisher=Area Tenda
+AppPublisher=CorradoWEB 2026
 DefaultDirName={autopf}\Gestionale Preventivi
 DefaultGroupName={#AppName}
 OutputDir=..\..\dist-installer
-OutputBaseFilename=Gestionale Preventivi 1.0.2 Setup
+OutputBaseFilename=Gestionale Preventivi 1.0.16 Setup
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=admin
@@ -53,9 +53,16 @@ var
   Key: string;
 begin
   Key := 'SOFTWARE\Microsoft\EdgeUpdate\Clients\' + WebView2ClientId;
-  Result := RegQueryStringValue(HKLM64, Key, 'pv', Version) and IsRuntimeVersionValid(Version);
+  { Microsoft registers the 64-bit Evergreen Runtime in the 32-bit registry
+    view (WOW6432Node), while per-user installations use the normal user view. }
+  Result := RegQueryStringValue(HKLM32, Key, 'pv', Version) and IsRuntimeVersionValid(Version);
   if not Result then
     Result := RegQueryStringValue(HKCU64, Key, 'pv', Version) and IsRuntimeVersionValid(Version);
+  { Also accept the alternate views in case a device has legacy registration. }
+  if not Result then
+    Result := RegQueryStringValue(HKLM64, Key, 'pv', Version) and IsRuntimeVersionValid(Version);
+  if not Result then
+    Result := RegQueryStringValue(HKCU32, Key, 'pv', Version) and IsRuntimeVersionValid(Version);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;

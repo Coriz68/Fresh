@@ -9,11 +9,22 @@ const pdfSource = fs.readFileSync(new URL('../gestionale-pdf.js', `file://${__di
 
 function makePdfHarness() {
   const pages = [];
+  const metadata = { keywords: [] };
+  let textMeasureCalls = 0;
   const logoSize = { width: 2048, height: 2048 };
-  const regular = { widthOfTextAtSize: (text, size) => text.length * size * 0.5 };
+  const regular = {
+    widthOfTextAtSize: (text, size) => {
+      textMeasureCalls++;
+      if (/[\u0000-\u001f\u007f-\u009f]/.test(text)) throw new Error('WinAnsi cannot encode control characters');
+      return text.length * size * 0.5;
+    }
+  };
   const pdf = {
-    setTitle() {},
-    setAuthor() {},
+    setTitle(value) { metadata.title = value; },
+    setSubject(value) { metadata.subject = value; },
+    setAuthor(value) { metadata.author = value; },
+    setCreator(value) { metadata.creator = value; },
+    setKeywords(value) { metadata.keywords = value; },
     embedFont: async () => regular,
     embedPng: async () => logoSize,
     embedJpg: async () => logoSize,
@@ -30,6 +41,7 @@ function makePdfHarness() {
     },
     copyPages: async () => [],
     getPageIndices: () => [],
+    getPageCount: () => 1,
     save: async () => new Uint8Array([37, 80, 68, 70])
   };
   const window = {
@@ -50,7 +62,7 @@ function makePdfHarness() {
     String
   };
   vm.runInNewContext(pdfSource, sandbox);
-  return { window, pages };
+  return { window, pages, metadata, getTextMeasureCalls: () => textMeasureCalls };
 }
 
 const payload = {
@@ -61,6 +73,7 @@ const payload = {
   },
   client: { name: 'Cliente Demo', company: 'Cliente S.r.l.', address: 'Via Verdi 5', postalCode: '60025', city: 'Loreto', province: 'AN', email: 'cliente@example.it', phone: '' },
   quote: {
+    id: 'quote-42', revision: 'a'.repeat(64), kind: 'customer',
     number: 'PREV-2026-0042', createdAt: '2026-11-12', validityDays: 30, vatRate: 22, notes: 'Installazione inclusa.',
     items: [{ moduleId: 'tenda', quantity: 2, price: 1250, discount: 10 }]
   },
@@ -68,9 +81,11 @@ const payload = {
 };
 
 test('PDF cliente: il logo Fresh è più grande e il riepilogo usa una gerarchia grafica professionale', async () => {
-  const { window, pages } = makePdfHarness();
+  const { window, pages, metadata } = makePdfHarness();
   await window.buildQuotePdfDocument(payload, []);
 
+  assert.equal(metadata.author, 'CorradoWEB 2026');
+  assert.equal(metadata.creator, 'CorradoWEB 2026');
   const [page] = pages;
   const [logo] = page.drawImageCalls;
   assert.ok(logo.height >= 100, `Il logo deve avere un’altezza di almeno 100 pt (attuale: ${logo.height}).`);
@@ -96,27 +111,49 @@ test('PDF cliente: riepiloghi lunghi proseguono su più pagine mantenendo riferi
   assert.ok(pages[1].drawTextCalls.some(call => call.text.startsWith('TOTALE:')));
 });
 
-test('PDF cliente: note e piè di pagina su più righe non bloccano la generazione', async () => {
+test('PDF cliente: accorcia note molto lunghe con un numero limitato di misurazioni', async () => {
+  const harness = makePdfHarness();
+  const longQuote = structuredClone(payload);
+  longQuote.company.logo = '';
+  longQuote.quote.notes = 'Nota '.repeat(2000);
+
+  await harness.window.buildQuotePdfDocument(longQuote, []);
+
+  assert.ok(harness.getTextMeasureCalls() < 100, `Le misurazioni del testo devono restare sotto 100, attuali: ${harness.getTextMeasureCalls()}.`);
+});
+
+test('PDF cliente: normalizza note multilinea e rimuove caratteri di controllo', async () => {
   const { window, pages } = makePdfHarness();
-  // Come le font standard di pdf-lib (WinAnsi), che non codificano i caratteri di controllo.
-  const strictFont = {
-    widthOfTextAtSize(text, size) {
-      if (/[\u0000-\u001f]/.test(text)) throw new Error(`WinAnsi cannot encode ${JSON.stringify(text)}`);
-      return text.length * size * 0.5;
-    }
-  };
-  const created = await window.PDFLib.PDFDocument.create();
-  created.embedFont = async () => strictFont;
-  const multiline = structuredClone(payload);
-  multiline.company.footerNotes = 'IBAN IT00 X000 0000 0000\nPagamento 30 gg';
-  multiline.quote.notes = 'Prima riga delle note.\r\nSeconda riga\tcon tabulazione.\n\nTerza riga.';
+  const multilineQuote = structuredClone(payload);
+  multilineQuote.company.logo = '';
+  multilineQuote.quote.notes = 'Prima riga\r\nSeconda riga\ttabulato\u0085C1';
 
-  await window.buildQuotePdfDocument(multiline, []);
+  await window.buildQuotePdfDocument(multilineQuote, []);
 
-  const texts = pages[0].drawTextCalls.map(call => call.text);
-  assert.ok(texts.every(text => !/[\u0000-\u001f]/.test(text)), 'Nessun testo del PDF può contenere caratteri di controllo.');
-  assert.ok(texts.includes('NOTE: Prima riga delle note.'), 'Ogni riga delle note va su una riga del PDF.');
-  assert.ok(texts.includes('Seconda riga con tabulazione.'));
-  assert.ok(texts.includes('Terza riga.'));
-  assert.ok(texts.includes('IBAN IT00 X000 0000 0000 · Pagamento 30 gg'), 'Il piè di pagina resta su una riga.');
+  assert.ok(pages[0].drawTextCalls.some(call => call.text === 'NOTE: Prima riga Seconda riga tabulatoC1'));
+});
+
+test('PDF cliente: una nota di un milione di caratteri viene accorciata rapidamente', async () => {
+  const harness = makePdfHarness();
+  const hugeQuote = structuredClone(payload);
+  hugeQuote.company.logo = '';
+  hugeQuote.quote.notes = 'X'.repeat(1_000_000);
+
+  await harness.window.buildQuotePdfDocument(hugeQuote, []);
+
+  assert.ok(harness.getTextMeasureCalls() < 100, `Le misurazioni devono restare sotto 100, attuali: ${harness.getTextMeasureCalls()}.`);
+  assert.ok(harness.pages[0].drawTextCalls.some(call => call.text.startsWith('NOTE: X') && call.text.endsWith('...')));
+});
+
+test('PDF fornitore: esclude dati cliente e associa identificativo, revisione e tipologia', async () => {
+  const harness = makePdfHarness();
+
+  await harness.window.buildSupplierPdfDocument([], { id: 'quote-42', revision: 'b'.repeat(64), kind: 'supplier', number: 'PREV-2026-0042', recipient: '393331234567', moduleIds: ['item-7'] });
+
+  assert.equal(harness.metadata.author, 'CorradoWEB 2026');
+  assert.equal(harness.metadata.creator, 'CorradoWEB 2026');
+  assert.doesNotMatch(harness.metadata.title + harness.metadata.subject, /Cliente Riservato/i);
+  assert.match(harness.metadata.subject, /PREV-2026-0042/);
+  assert.doesNotMatch(harness.metadata.title + harness.metadata.subject, /\b(?:totale|prezzo|€)\b/i);
+  assert.deepEqual(Array.from(harness.metadata.keywords), ['quote_id=quote-42', `revision=${'b'.repeat(64)}`, 'kind=supplier', 'recipient=393331234567', 'module_ids=item-7']);
 });

@@ -7,6 +7,7 @@ import binascii
 import json
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -71,7 +72,7 @@ class LocalStore:
         elif not database_path.is_file():
             raise FileNotFoundError(f"Database non trovato: {database_path}")
         else:
-            state = self._read_database(database_path)
+            state = self._load_database_with_migration(database_path)
         return {
             "state": state,
             "paths": self.paths,
@@ -98,7 +99,7 @@ class LocalStore:
         if database_path.exists():
             if mode != "open":
                 raise ValueError("Il database esiste già: aprilo per conservarne i dati.")
-            state = self._read_database(database_path)
+            state = self._load_database_with_migration(database_path)
         else:
             if mode == "copy-current":
                 if current_state is None:
@@ -231,10 +232,50 @@ class LocalStore:
             not isinstance(state, dict)
             or not isinstance(state.get("clients"), list)
             or not isinstance(state.get("quotes"), list)
+            or not all(isinstance(quote, dict) for quote in state.get("quotes", []))
             or not isinstance(state.get("prices"), dict)
             or not isinstance(state.get("company"), dict)
         ):
             raise ValueError("La struttura del database non è valida.")
+
+    def _load_database_with_migration(self, database_path: Path) -> dict[str, Any]:
+        state = self._read_database(database_path)
+        state, migrated = self._migrate_quote_send_fields(state)
+        if migrated:
+            self._create_pre_migration_backup(database_path)
+            self._atomic_write_json(database_path, state)
+        return state
+
+    @staticmethod
+    def _migrate_quote_send_fields(state: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        migrated = False
+        for quote in state["quotes"]:
+            for key in ("sentCustomerAt", "sentSupplierAt"):
+                if key not in quote:
+                    quote[key] = None
+                    migrated = True
+        return state, migrated
+
+    @staticmethod
+    def _create_pre_migration_backup(database_path: Path) -> Path:
+        base = database_path.with_name(f"{database_path.stem}.pre-1.0.6.backup{database_path.suffix}")
+        number = 1
+        while True:
+            candidate = base if number == 1 else base.with_name(
+                f"{base.stem}-{number}{base.suffix}"
+            )
+            try:
+                with database_path.open("rb") as source, candidate.open("xb") as backup:
+                    shutil.copyfileobj(source, backup)
+                    backup.flush()
+                    os.fsync(backup.fileno())
+                return candidate
+            except FileExistsError:
+                number += 1
+            except OSError:
+                if candidate.exists():
+                    candidate.unlink()
+                raise
 
     @staticmethod
     def _existing_directory(folder: str | Path, kind: str) -> Path:

@@ -1,7 +1,7 @@
-GESTIONALE PREVENTIVI — VERSIONE 1.0.2
+GESTIONALE PREVENTIVI — VERSIONE 1.0.16 — CorradoWEB 2026
 
 INSTALLER WINDOWS
-- Il setup `Gestionale Preventivi 1.0.2 Setup.exe` installa l'app autonoma su Windows 10/11 a 64 bit; Python non è richiesto.
+- Il setup `Gestionale Preventivi 1.0.16 Setup.exe` installa l'app autonoma su Windows 10/11 a 64 bit; Python non è richiesto.
 - Se Microsoft Edge WebView2 Evergreen Runtime manca, il setup lo installa automaticamente; serve una connessione Internet.
 - Consulta `docs/INSTALLAZIONE_WINDOWS.md` per checksum, avvisi di sicurezza e istruzioni di installazione.
 
@@ -25,14 +25,14 @@ PRIMO AVVIO E ARCHIVIAZIONE
 2. Se la cartella scelta contiene già un database valido, il gestionale lo apre. Se è vuota e hai dati già aperti, scegli se copiarli o iniziare da zero.
 3. Scegli due cartelle PDF distinte: una per i clienti e una per il fornitore.
 4. Configura ragione sociale, contatti, logo, IVA e listino; salva le impostazioni.
-5. Il database è JSON in chiaro sul disco scelto. Esporta regolarmente un backup e proteggi l’accesso al computer.
+5. Il database è JSON in chiaro sul disco scelto. Esporta regolarmente un backup e proteggi l’accesso al computer. L’aggiornamento dalla 1.0.5 alla 1.0.6 ha creato una copia prima della migrazione; gli aggiornamenti successivi conservano i dati locali.
 
 PREVENTIVI E PDF
 1. Crea o seleziona un cliente, aggiungi i moduli e compila ciascun modulo originale.
-2. “Genera PDF cliente completo” crea un documento con riepilogo, dati aziendali e cliente, prezzi, sconti, IVA, note e tutti i moduli. Ogni modulo riporta il nome del cliente e il numero del preventivo.
-3. “Genera PDF fornitore · soli moduli” crea il PDF con le pagine originali dei moduli, senza riepilogo commerciale e senza prezzi; i moduli riportano nome cliente e numero preventivo.
+2. “Genera PDF cliente completo” crea un documento con riepilogo, dati aziendali e cliente, prezzi, sconti, IVA, note e tutti i moduli.
+3. “Genera PDF fornitore · soli moduli” include soltanto i moduli pertinenti selezionati e non contiene dati anagrafici cliente né informazioni commerciali.
 4. Ogni PDF viene salvato nella cartella scelta per la relativa destinazione. Se un file con lo stesso nome esiste già, viene creato un nome con suffisso numerico.
-5. La finestra di anteprima permette anche di scaricare una copia.
+5. Il pulsante WhatsApp verifica il numero e il PDF, copia il documento negli appunti e apre il protocollo WhatsApp. Se Desktop non si avvia, apre WhatsApp Web e seleziona il PDF in Esplora file. I tre pulsanti restano disponibili per aprire WhatsApp, la chat nel browser o la cartella del PDF. Premi Ctrl+V e poi Invio nella chat. Il gestionale non simula Invio e mostra solo “PDF pronto per l’invio”.
 
 VERIFICA WINDOWS
 Prima della consegna, prova installazione, avvio, generazione dei due PDF, cartelle locali, backup e disinstallazione su un computer Windows 10/11. Il setup non è firmato digitalmente e Windows potrebbe mostrare l'avviso per autore sconosciuto.

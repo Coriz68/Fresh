@@ -13,6 +13,7 @@ test('Tende da sole: il PDF appiattisce il testo in una sola immagine senza camp
   const drawnImages = [];
   const pageAnnotationWrites = [];
   const catalogWrites = [];
+  const metadata = {};
   const page = {
     getWidth: () => 841.89,
     getHeight: () => 595.28,
@@ -22,7 +23,9 @@ test('Tende da sole: il PDF appiattisce il testo in una sola immagine senza camp
   };
   const document = {
     getPages: () => [page],
-    setTitle: () => {},
+    setTitle: value => { metadata.title = value; },
+    setAuthor: value => { metadata.author = value; },
+    setCreator: value => { metadata.creator = value; },
     context: {
       obj: value => value,
       register: value => value,
@@ -51,6 +54,8 @@ test('Tende da sole: il PDF appiattisce il testo in una sola immagine senza camp
 
   await makePDF();
 
+  assert.equal(metadata.author, undefined);
+  assert.equal(metadata.creator, undefined);
   assert.equal(drawnImages.length, 1, 'L’immagine con testo e segni deve essere disegnata una volta sola.');
   assert.equal(pageAnnotationWrites.length, 0, 'Il modulo PDF statico non deve aggiungere widget testuali.');
   assert.equal(catalogWrites.length, 0, 'Il modulo PDF statico non deve aggiungere un AcroForm parallelo.');

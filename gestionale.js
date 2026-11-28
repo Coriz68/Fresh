@@ -4,6 +4,7 @@ const DB_NAME = 'area-tenda-preventivi';
 const DB_VERSION = 1;
 const STORE_NAME = 'appState';
 const CHANNEL = 'area-tenda-quote-manager';
+const DESKTOP_MODE = new URLSearchParams(location.search).get('desktop') === '1';
 const app = document.querySelector('#app');
 const frame = document.querySelector('#moduleFrame');
 const moduleDialog = document.querySelector('#moduleDialog');
@@ -23,12 +24,15 @@ let activeModuleItemId = null;
 let pendingRequests = new Map();
 let saveQueue = Promise.resolve();
 let saveTimer;
+let lastSaveError = null;
 let modulePullTimer;
 let toastTimer;
 let pdfUrl = '';
 let generatedPdfBytes = null;
 let generatedPdfKind = 'customer';
-let pdfGenerationRunning = false;
+let pdfGenerationActive = false;
+let whatsappShareActive = false;
+let activeWhatsappPdf = null;
 
 const emptyState = () => ({
   clients: [],
@@ -66,6 +70,14 @@ function dateLabel(value) {
   return Number.isNaN(date.valueOf()) ? '—' : new Intl.DateTimeFormat('it-IT').format(date);
 }
 
+function dateTimeLabel(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf())
+    ? '—'
+    : new Intl.DateTimeFormat('it-IT', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+}
+
 function localDateString(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -83,6 +95,13 @@ function showToast(message, isError = false) {
   toast.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove('show'), 4200);
+}
+
+function showPdfProgress(message) {
+  toast.textContent = message;
+  toast.classList.remove('error');
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
 }
 
 function openDatabase() {
@@ -105,8 +124,9 @@ async function waitForDesktopBridge() {
     return typeof candidate?.load_initial_data === 'function' ? candidate : null;
   };
   if (api()) return api();
+  if (!DESKTOP_MODE) return null;
   await new Promise(resolve => {
-    const timeout = setTimeout(resolve, 1500);
+    const timeout = setTimeout(resolve, 15000);
     window.addEventListener('pywebviewready', () => {
       clearTimeout(timeout);
       resolve();
@@ -135,22 +155,65 @@ function writeState(snapshot) {
 
 function persistSoon() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => persistNow(), 350);
+  saveTimer = setTimeout(() => { void persistNow(); }, 350);
+}
+
+function logDesktopEvent(event) {
+  if (typeof desktopBridge?.log_event !== 'function') return;
+  try {
+    Promise.resolve(desktopBridge.log_event(event)).catch(() => undefined);
+  } catch {
+    // Diagnostics must never interrupt saving or PDF generation.
+  }
 }
 
 function persistNow() {
   clearTimeout(saveTimer);
+  if (!state) return Promise.resolve(false);
   const snapshot = structuredClone(state);
   if (desktopBridge && (!storagePaths.database_dir || databaseError)) {
-    showToast(databaseError || 'Scegli prima la cartella del database locale.', true);
-    return Promise.resolve();
+    lastSaveError = new Error(databaseError || 'Scegli prima la cartella del database locale.');
+    showToast(lastSaveError.message, true);
+    return Promise.resolve(false);
   }
-  saveQueue = saveQueue
+  logDesktopEvent('state_save_started');
+  const pendingSave = saveQueue
     .catch(() => undefined)
-    .then(() => desktopBridge ? desktopBridge.save_state(snapshot) : writeState(snapshot))
-    .catch(error => showToast(`Errore di salvataggio: ${error.message}`, true));
+    .then(() => desktopBridge ? desktopBridge.save_state(snapshot) : writeState(snapshot));
+  saveQueue = pendingSave.then(() => {
+    lastSaveError = null;
+    logDesktopEvent('state_save_succeeded');
+    return true;
+  }).catch(error => {
+    lastSaveError = error;
+    logDesktopEvent('state_save_failed');
+    showToast(`Errore di salvataggio: ${error.message}`, true);
+    return false;
+  });
   return saveQueue;
 }
+
+window.flushDesktopBeforeClose = async () => {
+  clearTimeout(saveTimer);
+  if (!DESKTOP_MODE || !desktopBridge || !state) return true;
+  if (!storagePaths.database_dir || databaseError) {
+    if (hasMeaningfulState()) {
+      showToast(databaseError || 'Scegli una cartella database prima di chiudere: i dati non sono ancora salvati.', true);
+      return false;
+    }
+    return true;
+  }
+  if (moduleDialog.open && activeModuleItemId) {
+    clearTimeout(modulePullTimer);
+    try {
+      await pullActiveModule();
+    } catch (error) {
+      showToast(`Impossibile salvare il modulo aperto: ${error.message}`, true);
+      return false;
+    }
+  }
+  return persistNow();
+};
 
 async function loadCatalog() {
   const response = await fetch('Apri_catalogo.html');
@@ -179,7 +242,7 @@ function normalizeState(value) {
     clients: Array.isArray(source.clients) ? source.clients.filter(client => client && typeof client === 'object') : [],
     quotes: Array.isArray(source.quotes) ? source.quotes.filter(quote => quote && typeof quote === 'object') : [],
     prices: source.prices && typeof source.prices === 'object' && !Array.isArray(source.prices) ? source.prices : {},
-    company: { ...base.company }
+    company: { ...company }
   };
   for (const key of Object.keys(base.company)) {
     normalized.company[key] = company[key] == null ? '' : String(company[key]);
@@ -229,8 +292,51 @@ function snapshotClient(client) {
   };
 }
 
+function normalizePhoneNumber(value) {
+  const original = String(value ?? '').trim();
+  if (!original) return { value: '', valid: true, empty: true };
+  const italianPrefixWithTrunk = /^(?:\+|00)39\s*\(0\)/.test(original);
+  let normalized = original.replace(/\(\s*0\s*\)/g, italianPrefixWithTrunk ? '0' : '').replace(/[\s().-]/g, '');
+  if (normalized.startsWith('00')) normalized = `+${normalized.slice(2)}`;
+  else if (!normalized.startsWith('+')) normalized = `+39${normalized}`;
+  const valid = /^\+[1-9]\d{7,14}$/.test(normalized);
+  return { value: normalized, valid, empty: false };
+}
+
+function updatePhoneValidation(input) {
+  const result = normalizePhoneNumber(input.value);
+  const feedback = formDialog.querySelector('#phoneValidation');
+  input.setAttribute('aria-invalid', result.empty || result.valid ? 'false' : 'true');
+  if (feedback) {
+    feedback.textContent = result.empty || result.valid ? '' : 'Numero non valido. Usa un numero nazionale o internazionale con 8–15 cifre.';
+    feedback.hidden = result.empty || result.valid;
+  }
+  return result;
+}
+
 function activeClient(quote) {
   return quote.clientSnapshot || snapshotClient(getClient(quote.clientId));
+}
+
+function quoteModuleData(kind, originalData, client, quote, schemaFields = []) {
+  const data = structuredClone(originalData || {});
+  if (kind === 'supplier') {
+    if (!schemaFields.length) throw new Error('Schema tecnico del modulo non verificabile: PDF fornitore bloccato.');
+    const allowed = new Set(schemaFields.flatMap(field => [field.id, field.key]).filter(Boolean));
+    const privateKey = /cliente|client|note|prezz|cost|scont|import|totale|installaz|commercial|email|telefono|indirizzo|ragione|vat|fiscal/i;
+    const filtered = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (allowed.has(key) && !privateKey.test(key)) filtered[key] = value;
+    }
+    const identityValues = [client.name, client.company, client.taxCode, client.vatNumber, client.address, client.email, client.phone]
+      .map(value => String(value || '').trim().toLocaleLowerCase()).filter(value => value.length >= 4);
+    const flatten = value => typeof value === 'string' ? [value] : Array.isArray(value) ? value.flatMap(flatten) : value && typeof value === 'object' ? Object.values(value).flatMap(flatten) : [];
+    const technicalValues = flatten(filtered).join(' ').toLocaleLowerCase();
+    if (identityValues.some(value => technicalValues.includes(value))) throw new Error('Un campo tecnico contiene dati anagrafici del cliente. PDF fornitore bloccato.');
+    filtered.riferimento = quote.number;
+    return filtered;
+  }
+  return { ...data, cliente: client.name || client.company || '', riferimento: quote.number };
 }
 
 function quoteTotals(quote) {
@@ -252,6 +358,16 @@ function quoteTotals(quote) {
 
 function quoteStatusClass(status) {
   return ({ inviato: 'sent', accettato: 'accepted', archiviato: 'closed' })[status] || '';
+}
+
+function quoteSendStatusMarkup(quote) {
+  const customer = quote.sentCustomerAt
+    ? `Inviato il ${esc(dateTimeLabel(quote.sentCustomerAt))}`
+    : 'Non inviato';
+  const supplier = quote.sentSupplierAt
+    ? `Inviato il ${esc(dateTimeLabel(quote.sentSupplierAt))}`
+    : 'Non inviato';
+  return `<div class="send-indicators"><span><b>PDF cliente</b> · ${customer}</span><span><b>PDF fornitore</b> · ${supplier}</span></div>`;
 }
 
 function setPage(page) {
@@ -295,7 +411,7 @@ function renderDashboard() {
   const latest = [...state.quotes].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 6);
   app.innerHTML = `
     <div class="stat-grid">
-      <section class="card stat"><div class="stat-label">Preventivi totali</div><div class="stat-value">${state.quotes.length}</div><div class="stat-foot">${desktopBridge ? 'Salvati nella cartella database' : 'Salvati in questo browser'}</div></section>
+      <section class="card stat"><div class="stat-label">Preventivi totali</div><div class="stat-value">${state.quotes.length}</div><div class="stat-foot">${desktopBridge ? 'Salvati sul disco locale' : 'Salvati in questo browser'}</div></section>
       <section class="card stat"><div class="stat-label">In lavorazione</div><div class="stat-value">${openQuotes}</div><div class="stat-foot">Bozze e preventivi inviati</div></section>
       <section class="card stat"><div class="stat-label">Clienti registrati</div><div class="stat-value">${totalClients}</div><div class="stat-foot">Anagrafiche disponibili</div></section>
     </div>
@@ -312,7 +428,7 @@ function renderDashboard() {
         <div class="stack">
           <div><span class="badge">${state.company.name ? 'Completato' : 'Da configurare'}</span><p class="client-detail"><a class="module-link" href="#" data-page="company">Dati aziendali, intestazione e note PDF →</a></p></div>
           <div><span class="badge">${Object.keys(state.prices).length ? 'Iniziato' : 'Da configurare'}</span><p class="client-detail"><a class="module-link" href="#" data-page="prices">Inserisci i prezzi di listino dei moduli →</a></p></div>
-          <div class="footer-note">Il gestionale non usa servizi cloud: clienti, preventivi e impostazioni restano ${desktopBridge ? 'nel file preventivi.json della cartella database' : 'nel database del browser'} su questo computer. Esporta periodicamente un backup.</div>
+          <div class="footer-note">${desktopBridge ? 'Il gestionale non usa servizi cloud: clienti, preventivi e impostazioni restano nel database locale scelto.' : 'Il gestionale non usa servizi cloud: clienti, preventivi e impostazioni restano nel database del browser su questo computer.'} Esporta periodicamente un backup.</div>
         </div>
       </section>
     </div>`;
@@ -320,10 +436,10 @@ function renderDashboard() {
 
 function renderQuoteTable(quotes) {
   if (!quotes.length) return '<div class="empty"><strong>Nessun preventivo</strong>Crea il primo preventivo per iniziare.</div>';
-  return `<div class="table-wrap"><table><thead><tr><th>NUMERO</th><th>CLIENTE</th><th>AGGIORNATO</th><th>STATO</th><th class="right">TOTALE SCONTATO</th><th></th></tr></thead><tbody>${quotes.map(quote => {
+  return `<div class="table-wrap"><table><thead><tr><th>NUMERO</th><th>CLIENTE</th><th>AGGIORNATO</th><th>STATO</th><th>INVII PDF</th><th class="right">TOTALE SCONTATO</th><th></th></tr></thead><tbody>${quotes.map(quote => {
     const client = activeClient(quote);
     const totals = quoteTotals(quote);
-    return `<tr><td><b>${esc(quote.number)}</b></td><td>${esc(clientLabel(client))}</td><td>${dateLabel(quote.updatedAt)}</td><td><span class="status ${quoteStatusClass(quote.status)}">${esc(quote.status || 'bozza')}</span></td><td class="right">${money(totals.netTotal)}</td><td><div class="row-actions"><button class="button small" data-action="open-quote" data-id="${esc(quote.id)}">Apri</button><button class="button small danger" data-action="delete-quote" data-id="${esc(quote.id)}" aria-label="Elimina ${esc(quote.number)}">×</button></div></td></tr>`;
+    return `<tr><td><b>${esc(quote.number)}</b></td><td>${esc(clientLabel(client))}</td><td>${dateLabel(quote.updatedAt)}</td><td><span class="status ${quoteStatusClass(quote.status)}">${esc(quote.status || 'bozza')}</span></td><td>${quoteSendStatusMarkup(quote)}</td><td class="right">${money(totals.netTotal)}</td><td><div class="row-actions"><button class="button small" data-action="open-quote" data-id="${esc(quote.id)}">Apri</button><button class="button small danger" data-action="delete-quote" data-id="${esc(quote.id)}" aria-label="Elimina ${esc(quote.number)}">×</button></div></td></tr>`;
   }).join('')}</tbody></table></div>`;
 }
 
@@ -387,7 +503,7 @@ function renderCompany() {
       </div>
     </section>
     <section class="card">
-      <div class="card-head"><div><h2>Intestazione e impostazioni PDF</h2><p>Questi dati sostituiscono l’intestazione AREA TENDA nel riepilogo cliente.</p></div><button class="button primary" data-action="save-company">Salva impostazioni</button></div>
+      <div class="card-head"><div><h2>Intestazione e impostazioni PDF</h2><p>Questi dati definiscono l’intestazione aziendale nel riepilogo cliente.</p></div><button class="button primary" data-action="save-company">Salva impostazioni</button></div>
       <div class="form-grid">
         <div class="field"><label>RAGIONE SOCIALE / NOME AZIENDA</label><input data-company="name" value="${esc(company.name)}" placeholder="Nome della tua azienda"></div>
         <div class="field"><label>PARTITA IVA</label><input data-company="vatNumber" value="${esc(company.vatNumber)}"></div>
@@ -422,9 +538,7 @@ async function chooseDatabaseFolder() {
       : 'empty';
   }
   if (storagePaths.database_dir && !databaseError) {
-    clearTimeout(saveTimer);
-    await saveQueue;
-    await desktopBridge.save_state(structuredClone(state));
+    if (!await persistNow()) throw new Error('Impossibile salvare i dati nella cartella database attuale. La cartella non è stata cambiata.');
   }
   const result = await desktopBridge.set_database_folder(selection.path, mode, mode === 'copy-current' ? structuredClone(state) : null);
   state = normalizeState(result.state);
@@ -492,11 +606,18 @@ function renderQuote() {
       </div>
       <aside class="card quote-side">
         <div class="card-head"><div><h2>${esc(quote.number)}</h2><p>Creato il ${dateLabel(quote.createdAt)}</p></div><span class="status ${quoteStatusClass(quote.status)}">${esc(quote.status || 'bozza')}</span></div>
+        ${quoteSendStatusMarkup(quote)}
+        <button class="button" data-action="duplicate-quote">Duplica preventivo</button>
         <button class="button primary" data-action="generate-pdf" data-kind="customer">Genera PDF cliente completo</button>
         <button class="button" data-action="generate-pdf" data-kind="supplier">Genera PDF fornitore · soli moduli</button>
+        ${desktopBridge ? `<button class="button" data-action="share-pdf-whatsapp" data-kind="customer" ${storagePaths.customer_pdf_dir ? '' : 'disabled'}>Prepara PDF cliente per WhatsApp</button>
+        <button class="button" data-action="share-pdf-whatsapp" data-kind="supplier" ${storagePaths.supplier_pdf_dir ? '' : 'disabled'}>Prepara PDF fornitore per WhatsApp</button>
+        <div class="footer-note">Dopo la generazione, usa le azioni separate nell’anteprima. Copia il PDF, apri la chat e invia manualmente.</div>` : ''}
+        <button class="button" data-action="mark-quote-sent" data-kind="customer">Conferma invio PDF cliente</button>
+        <button class="button" data-action="mark-quote-sent" data-kind="supplier">Conferma invio PDF fornitore</button>
         <button class="button" data-action="save-quote">Salva preventivo</button>
         <button class="button" data-action="back-quotes">Torna all’archivio</button>
-        <div class="footer-note">Il PDF cliente include riepilogo e moduli. Quello fornitore contiene solo i moduli, con nome cliente e riferimento al preventivo.</div>
+        <div class="footer-note">Il PDF cliente include dati cliente, prezzi e riepilogo. Quello fornitore contiene solo i moduli tecnici selezionati, senza dati cliente o informazioni commerciali.</div>
         ${!state.company.name ? '<p class="notice" style="margin-top:12px">Imposta i dati aziendali prima di generare il PDF cliente.</p>' : ''}
       </aside>
     </div>`;
@@ -509,12 +630,8 @@ function openFormDialog(title, body, onSubmit) {
   formDialog.querySelector('form').addEventListener('submit', async event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget).entries());
-    try {
-      if (await onSubmit(values) === false) return;
-    } catch (error) {
-      showToast(error.message, true);
-      return;
-    }
+    const shouldClose = await onSubmit(values);
+    if (shouldClose === false) return;
     formDialog.close();
   });
 }
@@ -529,14 +646,21 @@ function clientFields(client = {}) {
     ['postalCode', 'CAP', ''],
     ['city', 'CITTÀ', ''],
     ['province', 'PROVINCIA', ''],
-    ['phone', 'TELEFONO', ''],
     ['email', 'EMAIL', '']
   ];
-  return `<div class="form-grid">${fields.map(([key, label, placeholder]) => `<div class="field"><label>${label}</label><input name="${key}" value="${esc(client[key] || '')}" placeholder="${esc(placeholder)}"></div>`).join('')}</div>`;
+  return `<div class="form-grid">${fields.map(([key, label, placeholder]) => `<div class="field"><label>${label}</label><input name="${key}" value="${esc(client[key] || '')}" placeholder="${esc(placeholder)}"></div>`).join('')}
+    <div class="field"><label for="clientPhone">CELLULARE (FACOLTATIVO)</label><input id="clientPhone" name="phone" type="tel" inputmode="tel" autocomplete="tel" aria-describedby="phoneValidation" value="${esc(client.phone || '')}" placeholder="333 123 4567 o +33…"><p id="phoneValidation" class="validation-error" hidden></p></div></div>`;
 }
 
 function openClientDialog(existing = null) {
   openFormDialog(existing ? 'Modifica cliente' : 'Nuovo cliente', clientFields(existing || {}), async values => {
+    const phone = normalizePhoneNumber(values.phone);
+    if (!phone.valid) {
+      updatePhoneValidation(formDialog.querySelector('[name="phone"]'));
+      showToast('Inserisci un numero di cellulare valido oppure lascia il campo vuoto.', true);
+      return false;
+    }
+    values.phone = phone.value;
     const client = { ...(existing || {}), ...values, id: existing?.id || makeId(), updatedAt: new Date().toISOString() };
     if (!client.name.trim() && !client.company.trim()) {
       showToast('Inserisci il nome del cliente o la ragione sociale.', true);
@@ -547,6 +671,12 @@ function openClientDialog(existing = null) {
     await persistNow();
     render();
     showToast(existing ? 'Anagrafica cliente aggiornata.' : 'Cliente registrato.');
+  });
+  const phoneInput = formDialog.querySelector('[name="phone"]');
+  phoneInput.addEventListener('input', () => updatePhoneValidation(phoneInput));
+  phoneInput.addEventListener('blur', () => {
+    const result = updatePhoneValidation(phoneInput);
+    if (result.valid && !result.empty) phoneInput.value = result.value;
   });
 }
 
@@ -593,6 +723,8 @@ function newQuote() {
     validityDays: 30,
     vatRate: 22,
     status: 'bozza',
+    sentCustomerAt: null,
+    sentSupplierAt: null,
     notes: '',
     items: []
   };
@@ -601,6 +733,46 @@ function newQuote() {
   currentPage = 'quote';
   persistNow();
   render();
+}
+
+function duplicateQuote(sourceQuote) {
+  const sourceNumber = String(sourceQuote.number || 'PREVENTIVO').replace(/-COPIA-\d+$/i, '');
+  const existingNumbers = new Set(state.quotes.map(quote => String(quote.number || '')));
+  let sequence = 1;
+  let number;
+  do {
+    number = `${sourceNumber}-COPIA-${String(sequence).padStart(3, '0')}`;
+    sequence++;
+  } while (existingNumbers.has(number));
+  const today = localDateString(new Date());
+  return {
+    ...structuredClone(sourceQuote),
+    id: makeId(),
+    number,
+    createdAt: today,
+    updatedAt: today,
+    status: 'bozza',
+    sentCustomerAt: null,
+    sentSupplierAt: null
+  };
+}
+
+async function duplicateCurrentQuote() {
+  const sourceQuote = getQuote();
+  if (!sourceQuote) return;
+  const sourceId = currentQuoteId;
+  const copy = duplicateQuote(sourceQuote);
+  state.quotes.unshift(copy);
+  currentQuoteId = copy.id;
+  currentPage = 'quote';
+  if (!await persistNow()) {
+    state.quotes = state.quotes.filter(quote => quote.id !== copy.id);
+    currentQuoteId = sourceId;
+    renderQuote();
+    return;
+  }
+  renderQuote();
+  showToast(`Creato ${copy.number}. L’originale non è stato modificato.`);
 }
 
 async function loadModuleFrame(model) {
@@ -629,7 +801,7 @@ async function loadModuleFrame(model) {
       if (!(target instanceof Element)) return;
       if (!target.matches('input:not([type="file"]),textarea,button[aria-pressed]')) return;
       // Durante la generazione PDF l'iframe mostra altri moduli: non vanno copiati nella riga aperta.
-      if (pdfGenerationRunning) return;
+      if (pdfGenerationActive) return;
       clearTimeout(modulePullTimer);
       modulePullTimer = setTimeout(() => pullActiveModule().catch(error => showToast(error.message, true)), 180);
     };
@@ -686,7 +858,6 @@ async function openModuleEditor(itemId) {
 }
 
 async function pullActiveModule() {
-  if (pdfGenerationRunning) return;
   const quote = getQuote();
   const item = quote?.items.find(entry => entry.id === activeModuleItemId);
   if (!item || !frame.contentWindow) return;
@@ -697,7 +868,7 @@ async function pullActiveModule() {
 }
 
 async function closeModuleEditor() {
-  if (pdfGenerationRunning) {
+  if (pdfGenerationActive) {
     showToast('Attendi il termine della generazione del PDF.', true);
     return;
   }
@@ -761,15 +932,173 @@ async function handleLogoUpload(file) {
     reader.onerror = () => reject(new Error('Non riesco a leggere il file del logo.'));
     reader.readAsDataURL(file);
   });
-  await persistNow();
+  if (!await persistNow()) return;
   renderCompany();
   showToast('Logo salvato nelle impostazioni locali.');
 }
 
-async function generateQuotePdf(kind = 'customer') {
+function setPdfShareInstructions(message) {
+  const instructions = document.querySelector('#pdfShareInstructions');
+  if (!instructions) return;
+  instructions.textContent = message;
+  instructions.hidden = false;
+}
+
+async function shareQuotePdfViaWhatsApp(kind) {
+  if (!desktopBridge?.copy_whatsapp_pdf_clipboard) {
+    showToast('La condivisione WhatsApp è disponibile nella finestra desktop.', true);
+    return;
+  }
+  if (!['customer', 'supplier'].includes(kind)) return;
+  if (whatsappShareActive || pdfGenerationActive) {
+    showToast('Operazione PDF già in corso. Attendi il completamento.', true);
+    return;
+  }
+  whatsappShareActive = true;
+  document.querySelectorAll?.('[data-action="share-pdf-whatsapp"]').forEach(button => { button.disabled = true; });
+  try {
+    const quote = getQuote();
+    if (!quote) return;
+    let supplierItemIds = null;
+    if (kind === 'supplier') {
+      const choices = quote.items.map((item, index) => `${index + 1}. ${modules.find(model => model.id === item.moduleId)?.name || item.moduleId}`).join('\n');
+      const answer = window.prompt(`Seleziona i moduli pertinenti a questo fornitore, indicando i numeri separati da virgola.\n${choices}`) || '';
+      const indexes = answer.split(/[,;\s]+/).filter(Boolean).map(value => Number(value));
+      if (!indexes.length || indexes.some(index => !Number.isInteger(index) || index < 1 || index > quote.items.length) || new Set(indexes).size !== indexes.length) {
+        showToast('Selezione moduli fornitore non valida. PDF non generato.', true);
+        return;
+      }
+      supplierItemIds = indexes.map(index => quote.items[index - 1].id);
+    }
+    const generated = await generateQuotePdf(kind, '', supplierItemIds);
+    if (!generated?.path) return;
+    if (!generated.receipt || generated.receipt.path !== generated.path || generated.receipt.sha256?.length !== 64) {
+      throw new Error('Identità del PDF non verificabile. Rigenera il documento.');
+    }
+    if (await quoteRevision(JSON.stringify(getQuote())) !== generated.revision) {
+      throw new Error('Il preventivo è cambiato dopo la generazione. Rigenera il documento.');
+    }
+    const label = kind === 'customer' ? 'CLIENTE' : 'FORNITORE';
+    setPdfShareInstructions(`PDF ${label} pronto per l'invio. Scegli Copia PDF, Apri chat WhatsApp oppure Apri cartella.`);
+    showToast(`PDF ${label} pronto per l'invio.`);
+  } catch (error) {
+    const failure = `PDF non pronto: ${error.message}`;
+    setPdfShareInstructions(failure);
+    showToast(failure, true);
+  } finally {
+    whatsappShareActive = false;
+    document.querySelectorAll?.('[data-action="share-pdf-whatsapp"]').forEach(button => {
+      button.disabled = button.dataset.kind === 'customer' ? !storagePaths.customer_pdf_dir : !storagePaths.supplier_pdf_dir;
+    });
+  }
+}
+
+async function generateSupplierPdfPreview() {
+  const quote = getQuote();
+  if (!quote) return;
+  const choices = quote.items.map((item, index) => `${index + 1}. ${modules.find(model => model.id === item.moduleId)?.name || item.moduleId}`).join('\n');
+  const answer = window.prompt(`Seleziona i moduli pertinenti al fornitore, indicando i numeri separati da virgola.\n${choices}`) || '';
+  const indexes = answer.split(/[,;\s]+/).filter(Boolean).map(value => Number(value));
+  if (!indexes.length || indexes.some(index => !Number.isInteger(index) || index < 1 || index > quote.items.length) || new Set(indexes).size !== indexes.length) {
+    showToast('Selezione moduli fornitore non valida. PDF non generato.', true);
+    return;
+  }
+  await generateQuotePdf('supplier', '', indexes.map(index => quote.items[index - 1].id));
+}
+
+async function handleWhatsappPdfAction(action) {
+  const target = activeWhatsappPdf;
+  if (!target || whatsappShareActive || pdfGenerationActive) return;
+  if (!['copy-pdf', 'open-whatsapp', 'open-pdf-folder'].includes(action)) return;
+  whatsappShareActive = true;
+  const copyButton = document.querySelector('#copyPdfButton');
+  if (action === 'copy-pdf' && copyButton) copyButton.disabled = true;
+  try {
+    const quote = getQuote();
+    if (!quote || quote.id !== target.quoteId || await quoteRevision(JSON.stringify(quote)) !== target.revision) {
+      throw new Error('Il preventivo è cambiato. Rigenera il PDF prima di continuare.');
+    }
+    const isMac = /Mac|iPhone|iPad/i.test(String(window.navigator?.platform || ''));
+    if (action === 'copy-pdf') {
+      if (isMac) throw new Error('Su macOS usa Apri cartella e allega il PDF dalla cartella configurata.');
+      if (!target.path || !target.receipt) throw new Error('PDF salvato non verificabile. Usa Apri cartella.');
+      const copied = await desktopBridge.copy_whatsapp_pdf_clipboard(target.kind, target.path, target.quoteId, target.revision, target.moduleIds, target.receipt);
+      if (copied?.clipboardReady !== true || copied.path !== target.path || !copied.filename) {
+        throw new Error('Copia del PDF non verificata. Usa Apri cartella.');
+      }
+      setPdfShareInstructions(`PDF copiato: ${copied.filename}. Apri la chat e premi Ctrl+V.`);
+      showToast(`PDF copiato: ${copied.filename}. Apri la chat e premi Ctrl+V.`);
+      return;
+    }
+    if (action === 'open-whatsapp') {
+      const storedRecipient = String(target.recipient || '').trim();
+      let phoneInput = storedRecipient
+        ? (/^(?:\+|00)/.test(storedRecipient) ? storedRecipient : `+${storedRecipient}`)
+        : target.kind === 'customer' ? activeClient(quote)?.phone || '' : '';
+      if (!phoneInput) phoneInput = window.prompt('Inserisci il numero WhatsApp del fornitore, con prefisso internazionale:') || '';
+      const normalized = normalizePhoneNumber(phoneInput);
+      if (normalized.empty || !normalized.valid) throw new Error(`Numero WhatsApp ${target.kind === 'customer' ? 'cliente' : 'fornitore'} mancante o non valido.`);
+      const phone = normalized.value.replace(/\D/g, '');
+      const message = `Buongiorno, condivido il PDF del preventivo ${quote.number}.`;
+      const result = isMac
+        ? await desktopBridge.open_whatsapp_browser(phone, message)
+        : await desktopBridge.open_whatsapp_chat(phone, message);
+      setPdfShareInstructions(result?.method === 'browser' || result?.browserOpened
+        ? 'Chat aperta in WhatsApp Web. Allegare il PDF e premere Invio.'
+        : 'Chat WhatsApp aperta. Allegare il PDF e premere Invio.');
+      showToast('Chat aperta. Il PDF non è stato inviato.');
+      return;
+    }
+    if (!target.path) throw new Error('Il PDF salvato non è disponibile nella cartella configurata.');
+    await desktopBridge.reveal_pdf_in_explorer(target.kind, target.path);
+    setPdfShareInstructions('Cartella aperta con il PDF selezionato.');
+    showToast('Cartella aperta con il PDF selezionato.');
+  } catch (error) {
+    const failure = action === 'copy-pdf'
+      ? `Copia PDF non riuscita: ${error.message} Usa Apri cartella.`
+      : `Operazione non riuscita: ${error.message}`;
+    setPdfShareInstructions(failure);
+    showToast(failure, true);
+  } finally {
+    whatsappShareActive = false;
+    if (copyButton) copyButton.disabled = !activeWhatsappPdf?.path || pdfGenerationActive || isMacPlatform();
+  }
+}
+
+function isMacPlatform() {
+  return /Mac|iPhone|iPad/i.test(String(window.navigator?.platform || ''));
+}
+
+async function markQuoteSent(kind) {
+  const fields = { customer: ['sentCustomerAt', 'PDF cliente'], supplier: ['sentSupplierAt', 'PDF fornitore'] };
+  const entry = fields[kind];
+  const quote = getQuote();
+  if (!entry || !quote) return;
+  if (!window.confirm(`Confermi di avere effettivamente inviato il ${entry[1]}?`)) return;
+  const [field, label] = entry;
+  const previousValue = quote[field] || null;
+  quote[field] = new Date().toISOString();
+  if (!await persistNow()) {
+    quote[field] = previousValue;
+    return;
+  }
+  render();
+  showToast(`${label} registrato come inviato.`);
+}
+
+async function generateQuotePdf(kind = 'customer', recipient = '', supplierItemIds = null) {
   const quote = getQuote();
   if (!quote) return;
   const client = activeClient(quote);
+  let includedItems = quote.items;
+  if (kind === 'supplier') {
+    if (!Array.isArray(supplierItemIds) || !supplierItemIds.length || supplierItemIds.some(id => !id) || new Set(supplierItemIds).size !== supplierItemIds.length) {
+      throw new Error('Identità dei moduli pertinenti al fornitore non verificabile.');
+    }
+    includedItems = supplierItemIds.map(id => quote.items.find(item => item.id === id));
+    if (includedItems.some(item => !item)) throw new Error('La selezione dei moduli non corrisponde al preventivo corrente.');
+  }
+  if (!includedItems.length) throw new Error('Seleziona almeno un modulo tecnico per il PDF fornitore.');
   if (!client || !(client.name || client.company)) {
     showToast('Seleziona un cliente con nome o ragione sociale.', true);
     return;
@@ -778,7 +1107,7 @@ async function generateQuotePdf(kind = 'customer') {
     showToast('Inserisci il nome aziendale nelle impostazioni PDF.', true);
     return;
   }
-  if (!quote.items.length) {
+  if (!includedItems.length) {
     showToast('Aggiungi almeno un modulo al preventivo.', true);
     return;
   }
@@ -791,32 +1120,45 @@ async function generateQuotePdf(kind = 'customer') {
     showToast('Imposta un prezzo di listino maggiore di zero per ogni articolo.', true);
     return;
   }
-  if (pdfGenerationRunning) {
-    showToast('Generazione PDF già in corso: attendi il termine.', true);
+  if (pdfGenerationActive) {
+    showToast('La generazione di un PDF è già in corso. Attendi il completamento.', true);
     return;
   }
+  pdfGenerationActive = true;
+  activeWhatsappPdf = null;
+  const copyPdfButton = document.querySelector('#copyPdfButton');
+  if (copyPdfButton) copyPdfButton.disabled = true;
+  document.querySelectorAll('[data-action="open-whatsapp"], [data-action="open-pdf-folder"]').forEach(button => { button.disabled = true; });
+  let quoteSnapshot = '';
+  logDesktopEvent('pdf_generation_started');
+  document.querySelectorAll('[data-action="generate-pdf"]').forEach(button => { button.disabled = true; });
+  document.querySelectorAll('[data-action="share-pdf-whatsapp"]').forEach(button => { button.disabled = true; });
   const resumeModuleItemId = moduleDialog.open ? activeModuleItemId : null;
+  let savedPdfPath = '';
+  let savedPdfReceipt = null;
   try {
     if (resumeModuleItemId) {
-      clearTimeout(modulePullTimer);
       await pullActiveModule();
     }
-    pdfGenerationRunning = true;
-    showToast(`Genero il PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} dai moduli originali…`);
+    quoteSnapshot = JSON.stringify(quote);
+    showPdfProgress(`Preparo il PDF ${kind === 'customer' ? 'cliente' : 'fornitore'}…`);
     const modulePdfs = [];
     try {
-      for (const item of quote.items) {
+      for (let index = 0; index < includedItems.length; index++) {
+        const item = includedItems[index];
+        logDesktopEvent('pdf_module_started');
         const model = modules.find(entry => entry.id === item.moduleId);
         if (!model) throw new Error(`Modulo non trovato: ${item.moduleId}.`);
         const originalData = structuredClone(item.data || {});
-        const moduleData = {
-          ...originalData,
-          cliente: client.name || client.company || '',
-          riferimento: quote.number
-        };
         await loadModuleFrame(model);
+        const schemaText = frame.contentDocument?.getElementById('schema')?.textContent || '{}';
+        let schemaFields;
+        try { schemaFields = JSON.parse(schemaText).fields || []; }
+        catch { throw new Error(`Schema del modulo ${model.name} non verificabile.`); }
+        const moduleData = quoteModuleData(kind, originalData, client, quote, schemaFields);
         await requestModule('set-data', { data: moduleData });
         try {
+          showPdfProgress(`Creo il PDF del modulo ${index + 1} di ${includedItems.length}: ${model.name}…`);
           const response = await requestModule('get-pdf');
           modulePdfs.push(response.bytes);
         } finally {
@@ -825,12 +1167,16 @@ async function generateQuotePdf(kind = 'customer') {
       }
       const payload = {
         quote: {
+          id: quote.id,
+          revision: await quoteRevision(quoteSnapshot),
+          kind,
+          recipient,
           number: quote.number,
           createdAt: quote.createdAt,
           validityDays: quote.validityDays,
           vatRate: quote.vatRate,
           notes: quote.notes,
-          items: quote.items.map(({ moduleId, price, discount, quantity }) => ({ moduleId, price, discount, quantity }))
+          items: includedItems.map(({ moduleId, price, discount, quantity }) => ({ moduleId, price, discount, quantity }))
         },
         client,
         company: structuredClone(state.company),
@@ -838,30 +1184,66 @@ async function generateQuotePdf(kind = 'customer') {
       };
       let bytes;
       if (kind === 'customer') {
+        logDesktopEvent('pdf_customer_assembly');
+        showPdfProgress('Compongo il riepilogo commerciale e unisco i moduli…');
         const response = await requestModule('build-quote-pdf', { payload, modulePdfs });
         bytes = response.bytes;
       } else {
+        logDesktopEvent('pdf_supplier_merge');
+        showPdfProgress('Unisco le pagine dei moduli…');
         const supplierBuilder = frame.contentWindow?.buildSupplierPdfDocument;
         if (typeof supplierBuilder !== 'function') throw new Error('Generatore PDF fornitore non disponibile.');
-        bytes = await supplierBuilder(modulePdfs, quote.number, client.name || client.company || '');
+        const forbiddenValues = [client.name, client.company, client.taxCode, client.vatNumber, client.address, client.email, client.phone].filter(value => String(value || '').trim().length >= 4);
+        bytes = await supplierBuilder(modulePdfs, { id: quote.id, revision: payload.quote.revision, kind, number: quote.number, recipient, moduleIds: includedItems.map(item => item.id), forbiddenValues });
       }
+      if (JSON.stringify(getQuote()) !== quoteSnapshot) throw new Error('Il preventivo è cambiato durante la generazione. Rigenera il PDF aggiornato.');
       generatedPdfBytes = bytes;
       generatedPdfKind = kind;
+      const copyLabel = kind === 'customer' ? 'Copia PDF cliente' : 'Copia PDF fornitore';
+      if (copyPdfButton) {
+        copyPdfButton.textContent = copyLabel;
+        copyPdfButton.disabled = true;
+      }
       const blob = new Blob([bytes], { type: 'application/pdf' });
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
       pdfUrl = URL.createObjectURL(blob);
       document.querySelector('#pdfPreview').src = pdfUrl;
       document.querySelector('#pdfDialogTitle').textContent = kind === 'customer' ? 'Anteprima preventivo cliente' : 'Anteprima moduli fornitore';
       document.querySelector('#pdfDialogEyebrow').textContent = kind === 'customer' ? 'DOCUMENTO CLIENTE' : 'DOCUMENTO FORNITORE';
-      pdfDialog.showModal();
       if (desktopBridge) {
+        logDesktopEvent('pdf_disk_save_started');
+        showPdfProgress('Salvo il PDF nella cartella configurata…');
         const base64 = bytesToBase64(bytes);
         const prefix = kind === 'customer' ? 'cliente' : 'fornitore';
-        const saved = await desktopBridge.write_pdf(kind, `preventivo_${quote.number}_${prefix}.pdf`, base64);
+        const identity = { quote_id: quote.id, revision: payload.quote.revision, kind, recipient, module_ids: kind === 'supplier' ? includedItems.map(item => item.id) : [], forbidden_values: kind === 'supplier' ? [client.name, client.company, client.taxCode, client.vatNumber, client.address, client.email, client.phone].filter(value => String(value || '').trim().length >= 4) : [] };
+        const saved = await desktopBridge.write_pdf(kind, `preventivo_${quote.id}_${payload.quote.revision.slice(0, 12)}_${prefix}.pdf`, base64, identity);
+        savedPdfPath = saved.path;
+        savedPdfReceipt = saved.receipt;
+        activeWhatsappPdf = {
+          kind,
+          path: savedPdfPath,
+          quoteId: quote.id,
+          revision: payload.quote.revision,
+          moduleIds: kind === 'supplier' ? includedItems.map(item => item.id) : [],
+          receipt: savedPdfReceipt,
+          recipient
+        };
+        document.querySelectorAll('[data-action="open-whatsapp"], [data-action="open-pdf-folder"]').forEach(button => { button.disabled = false; });
         showToast(`PDF ${prefix} salvato: ${saved.path}`);
       } else {
+        activeWhatsappPdf = {
+          kind,
+          path: '',
+          quoteId: quote.id,
+          revision: payload.quote.revision,
+          moduleIds: kind === 'supplier' ? includedItems.map(item => item.id) : [],
+          receipt: null,
+          recipient
+        };
+        document.querySelectorAll('[data-action="open-whatsapp"]').forEach(button => { button.disabled = false; });
         showToast(`Anteprima PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} pronta.`);
       }
+      pdfDialog.showModal();
     } finally {
       if (resumeModuleItemId) {
         const activeItem = quote.items.find(item => item.id === resumeModuleItemId);
@@ -873,10 +1255,24 @@ async function generateQuotePdf(kind = 'customer') {
       }
     }
   } catch (error) {
+    logDesktopEvent('pdf_generation_failed');
     showToast(`PDF non generato: ${error.message}`, true);
   } finally {
-    pdfGenerationRunning = false;
+    pdfGenerationActive = false;
+    document.querySelectorAll('[data-action="generate-pdf"]').forEach(button => { button.disabled = false; });
+    document.querySelectorAll('[data-action="share-pdf-whatsapp"]').forEach(button => {
+      button.disabled = button.dataset.kind === 'customer' ? !storagePaths.customer_pdf_dir : !storagePaths.supplier_pdf_dir;
+    });
+    if (copyPdfButton) copyPdfButton.disabled = !activeWhatsappPdf?.path || isMacPlatform();
   }
+  return savedPdfPath ? { path: savedPdfPath, kind, revision: await quoteRevision(quoteSnapshot), moduleIds: kind === 'supplier' ? includedItems.map(item => item.id) : [], receipt: savedPdfReceipt } : null;
+}
+
+async function quoteRevision(serializedQuote) {
+  if (!window.crypto?.subtle) throw new Error('Impossibile verificare la revisione del preventivo: SHA-256 non disponibile.');
+  const bytes = new TextEncoder().encode(serializedQuote);
+  const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function bytesToBase64(bytes) {
@@ -980,6 +1376,7 @@ function handleClick(event) {
     currentQuoteId = id;
     setPage('quote');
   } else if (action === 'delete-quote') removeQuote(id);
+  else if (action === 'duplicate-quote') duplicateCurrentQuote();
   else if (action === 'back-quotes') setPage('quotes');
   else if (action === 'new-client') openClientDialog();
   else if (action === 'edit-client') openClientDialog(getClient(id));
@@ -1000,25 +1397,31 @@ function handleClick(event) {
       persistNow();
       renderQuote();
     }
-  } else if (action === 'generate-pdf') generateQuotePdf(button.dataset.kind || 'customer');
+  } else if (action === 'generate-pdf') {
+    if ((button.dataset.kind || 'customer') === 'supplier') generateSupplierPdfPreview();
+    else generateQuotePdf('customer');
+  }
+  else if (action === 'share-pdf-whatsapp') shareQuotePdfViaWhatsApp(button.dataset.kind || 'customer');
+  else if (['copy-pdf', 'open-whatsapp', 'open-pdf-folder'].includes(action)) handleWhatsappPdfAction(action);
+  else if (action === 'mark-quote-sent') markQuoteSent(button.dataset.kind || 'customer');
   else if (action === 'save-quote') {
     const quote = getQuote();
     if (quote) {
       quote.updatedAt = new Date().toISOString();
-      persistNow();
-      showToast('Preventivo salvato.');
+      void persistNow().then(saved => { if (saved) showToast('Preventivo salvato.'); });
     }
   } else if (action === 'save-prices') {
-    persistNow();
-    showToast('Listino salvato.');
+    void persistNow().then(saved => { if (saved) showToast('Listino salvato.'); });
   } else if (action === 'save-company') {
-    persistNow();
-    showToast('Impostazioni aziendali salvate.');
+    void persistNow().then(saved => { if (saved) showToast('Impostazioni aziendali salvate.'); });
   } else if (action === 'remove-logo') {
     state.company.logo = '';
-    persistNow();
-    renderCompany();
-    showToast('Logo rimosso.');
+    void persistNow().then(saved => {
+      if (saved) {
+        renderCompany();
+        showToast('Logo rimosso.');
+      }
+    });
   }
 }
 
@@ -1057,6 +1460,19 @@ app.addEventListener('change', event => {
 });
 
 document.querySelector('#newQuoteTop').addEventListener('click', newQuote);
+const closeAppButton = document.querySelector('#closeAppButton');
+closeAppButton.hidden = !DESKTOP_MODE;
+closeAppButton.addEventListener('click', async () => {
+  if (!desktopBridge?.request_close) {
+    showToast('Il collegamento per la chiusura sicura non è pronto. Usa la X della finestra.', true);
+    return;
+  }
+  try {
+    await desktopBridge.request_close();
+  } catch (error) {
+    showToast(`Chiusura non riuscita: ${error.message}`, true);
+  }
+});
 document.querySelector('#moduleSave').addEventListener('click', closeModuleEditor);
 document.querySelector('#moduleClose').addEventListener('click', closeModuleEditor);
 moduleDialog.addEventListener('cancel', event => {
@@ -1111,9 +1527,11 @@ async function init() {
   try {
     if (location.protocol === 'file:') throw new Error('Apri il gestionale con Avvia_gestionale.command: i moduli originali richiedono un’origine locale condivisa.');
     desktopBridge = await waitForDesktopBridge();
+    if (DESKTOP_MODE && !desktopBridge) throw new Error('Il collegamento al database locale non è pronto. Chiudi e riapri il gestionale; i dati non sono stati salvati nel browser.');
     if (desktopBridge) {
       const [initial, catalog] = await Promise.all([desktopBridge.load_initial_data(), loadCatalog()]);
       state = initial.state;
+      logDesktopEvent('bridge_ready');
       storagePaths = initial.paths || storagePaths;
       databaseError = initial.database_error || '';
       modules = catalog;
