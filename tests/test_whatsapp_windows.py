@@ -41,7 +41,9 @@ class WhatsAppWindowsTests(unittest.TestCase):
             content = DecodedStreamObject()
             content.set_data(f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode())
             page[NameObject("/Contents")] = content
-        keywords = [f"quote_id={QUOTE_ID}", f"revision={REVISION}", f"kind={kind}", f"recipient={recipient}"]
+        keywords = [f"quote_id={QUOTE_ID}", f"revision={REVISION}", f"kind={kind}"]
+        if recipient:
+            keywords.append(f"recipient={recipient}")
         if kind == "supplier":
             keywords.append(f"module_ids={'|'.join(module_ids or ['item-1'])}")
         writer.add_metadata({"/Title": "Preventivo", "/Keywords": keyword_separator.join(keywords)})
@@ -119,6 +121,33 @@ class WhatsAppWindowsTests(unittest.TestCase):
         self.assertEqual(clipboard, [str(self.pdf.resolve())])
         self.assertTrue(result["clipboardReady"])
         self.assertEqual(result["filename"], self.pdf.name)
+
+    def test_copy_pdf_without_recipient_like_the_preview_buttons(self):
+        # Il gestionale genera i PDF dall'anteprima senza destinatario: pdf-lib non scrive
+        # la chiave recipient e la copia negli appunti deve comunque riuscire.
+        for kind in ("customer", "supplier"):
+            with self.subTest(kind=kind):
+                suffix = "cliente" if kind == "customer" else "fornitore"
+                self.pdf = self.root / f"preventivo_{QUOTE_ID}_{REVISION[:12]}_{suffix}.pdf"
+                self.write_pdf(kind=kind, recipient="", keyword_separator=" ")
+                receipt = self.receipt(kind=kind, recipient="")
+                clipboard = []
+                result = whatsapp.copy_pdf_to_clipboard(
+                    str(self.pdf), kind, QUOTE_ID, REVISION, ["item-1"] if kind == "supplier" else [], receipt,
+                    platform_name="nt", clipboard_reader=lambda: list(clipboard),
+                    clipboard_writer=lambda path: clipboard.__setitem__(slice(None), [str(path)]),
+                )
+                self.assertTrue(result["clipboardReady"])
+
+    def test_copy_rejects_pdf_with_unexpected_recipient(self):
+        self.write_pdf(recipient="")
+        receipt = self.receipt(recipient="")
+        self.write_pdf(recipient="393339999999")
+        with self.assertRaisesRegex(RuntimeError, "metadato recipient non corrispondente"):
+            whatsapp.copy_pdf_to_clipboard(
+                str(self.pdf), "customer", QUOTE_ID, REVISION, [], receipt, platform_name="nt",
+                clipboard_reader=lambda: [], clipboard_writer=lambda _path: None,
+            )
 
     def test_copy_fails_if_file_drop_verification_does_not_match_exact_pdf(self):
         self.write_pdf()

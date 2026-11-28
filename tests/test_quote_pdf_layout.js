@@ -157,3 +157,18 @@ test('PDF fornitore: esclude dati cliente e associa identificativo, revisione e 
   assert.doesNotMatch(harness.metadata.title + harness.metadata.subject, /\b(?:totale|prezzo|€)\b/i);
   assert.deepEqual(Array.from(harness.metadata.keywords), ['quote_id=quote-42', `revision=${'b'.repeat(64)}`, 'kind=supplier', 'recipient=393331234567', 'module_ids=item-7']);
 });
+
+test('PDF cliente: la provincia già tra parentesi non viene raddoppiata', async () => {
+  const { window, pages } = makePdfHarness();
+  const quote = structuredClone(payload);
+  quote.company.logo = '';
+  quote.company.province = '(AN)';
+  quote.client.province = ' (MC) ';
+
+  await window.buildQuotePdfDocument(quote, []);
+
+  const texts = pages[0].drawTextCalls.map(call => call.text);
+  assert.ok(texts.some(text => text.includes('Loreto (AN)')));
+  assert.ok(texts.every(text => !text.includes('((')), 'Nessuna parentesi doppia nel PDF.');
+  assert.ok(texts.some(text => text.includes('Loreto (MC)')));
+});

@@ -137,7 +137,9 @@ def _validate_document(path: Path, expected: dict[str, str]) -> dict[str, Any]:
         for key, value in expected.items():
             if key.startswith("_"):
                 continue
-            if metadata.get(key) != str(value):
+            # Un valore atteso vuoto (es. PDF senza destinatario) richiede che il metadato
+            # sia assente o vuoto: pdf-lib non scrive affatto le chiavi vuote.
+            if metadata.get(key, "") != str(value):
                 raise ValueError(f"metadato {key} non corrispondente")
         if expected["kind"] == "supplier":
             reserved = re.compile(r"\b(?:total\w*|prezz\w*|scont\w*|import\w*|cost\w*|iva|installaz\w*|commercial\w*|euro|eur)\b|cliente:", re.I)

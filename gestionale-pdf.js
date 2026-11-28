@@ -35,9 +35,9 @@ window.buildQuotePdfDocument = async function (payload, modulePdfs) {
     const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
     logo = header.includes('image/png') ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
   }
-  const companyAddress = [company.address, company.postalCode, company.city, company.province ? `(${company.province})` : ''].filter(Boolean).join(' ');
+  const companyAddress = [company.address, company.postalCode, company.city, provinceLabel(company.province)].filter(Boolean).join(' ');
   const companyDetails = [company.vatNumber ? `P. IVA ${company.vatNumber}` : '', company.taxCode ? `C.F. ${company.taxCode}` : '', company.phone, company.email, company.website].filter(Boolean).join(' · ');
-  const clientAddress = [client.address, client.postalCode, client.city, client.province ? `(${client.province})` : ''].filter(Boolean).join(' ');
+  const clientAddress = [client.address, client.postalCode, client.city, provinceLabel(client.province)].filter(Boolean).join(' ');
   const clientDetails = [client.vatNumber ? `P. IVA ${client.vatNumber}` : '', client.taxCode ? `C.F. ${client.taxCode}` : '', client.email, client.phone].filter(Boolean).join(' · ');
   const drawTopText = (page, text, x, top, size, font = regular, fill = ink, maxWidth = 740) => {
     const safeText = fitPdfText(text, font, size, maxWidth);
@@ -153,6 +153,12 @@ window.buildSupplierPdfDocument = async function (modulePdfs, identity) {
   if (!pdf.getPageCount()) throw new Error('Il preventivo non contiene pagine modulo.');
   return pdf.save();
 };
+
+function provinceLabel(value) {
+  // Evita "((AN))" quando la provincia è già stata inserita tra parentesi.
+  const province = String(value ?? '').trim().replace(/^\(+\s*|\s*\)+$/g, '');
+  return province ? `(${province})` : '';
+}
 
 function pdfSafeText(value) {
   return String(value ?? '')
