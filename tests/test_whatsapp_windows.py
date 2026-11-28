@@ -27,7 +27,7 @@ class WhatsAppWindowsTests(unittest.TestCase):
         self.pdf = self.root / f"preventivo_{QUOTE_ID}_{REVISION[:12]}_cliente.pdf"
         self.addCleanup(self.temp.cleanup)
 
-    def write_pdf(self, path=None, *, kind="customer", recipient="393331234567", module_ids=None, text=None):
+    def write_pdf(self, path=None, *, kind="customer", recipient="393331234567", module_ids=None, text=None, keyword_separator=", "):
         if pypdf is None:
             self.skipTest("pypdf deve essere installato per verificare PDF reali")
         target = path or self.pdf
@@ -44,7 +44,7 @@ class WhatsAppWindowsTests(unittest.TestCase):
         keywords = [f"quote_id={QUOTE_ID}", f"revision={REVISION}", f"kind={kind}", f"recipient={recipient}"]
         if kind == "supplier":
             keywords.append(f"module_ids={'|'.join(module_ids or ['item-1'])}")
-        writer.add_metadata({"/Title": "Preventivo", "/Keywords": ", ".join(keywords)})
+        writer.add_metadata({"/Title": "Preventivo", "/Keywords": keyword_separator.join(keywords)})
         with target.open("wb") as stream:
             writer.write(stream)
         return target
@@ -62,6 +62,19 @@ class WhatsAppWindowsTests(unittest.TestCase):
         for builder in (whatsapp.build_whatsapp_protocol_url, whatsapp.build_whatsapp_web_url):
             with self.subTest(builder=builder.__name__), self.assertRaisesRegex(ValueError, "Numero WhatsApp"):
                 builder("bad-number", "Ciao")
+
+    def test_pdf_lib_space_separated_keywords_are_verified_by_real_pdf_reader(self):
+        # pdf-lib serializza i valori di setKeywords separandoli con spazi.
+        for kind in ("customer", "supplier"):
+            with self.subTest(kind=kind):
+                path = self.pdf if kind == "customer" else self.root / f"preventivo_{QUOTE_ID}_{REVISION[:12]}_fornitore.pdf"
+                self.write_pdf(path, kind=kind, keyword_separator=" ")
+                identity = {"quote_id": QUOTE_ID, "revision": REVISION, "kind": kind, "recipient": "393331234567"}
+                if kind == "supplier":
+                    identity["module_ids"] = ["item-1"]
+                receipt = whatsapp.create_pdf_receipt(path, identity)
+                self.assertEqual(receipt["quote_id"], QUOTE_ID)
+                self.assertEqual(receipt["revision"], REVISION)
 
     def test_open_chat_uses_protocol_first_and_does_not_touch_clipboard_or_store_api(self):
         launched = []

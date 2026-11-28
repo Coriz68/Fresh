@@ -76,17 +76,17 @@ jobs:
       - name: Calcola SHA-256
         shell: pwsh
         run: |
-          $installer = "dist-installer/Gestionale Preventivi 1.0.14 Setup.exe"
+          $installer = "dist-installer/Gestionale Preventivi 1.0.15 Setup.exe"
           if (-not (Test-Path $installer)) { throw "Installer non generato" }
           $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
-          $checksum = "$hash  Gestionale Preventivi 1.0.14 Setup.exe`n"
+          $checksum = "$hash  Gestionale Preventivi 1.0.15 Setup.exe`n"
           [System.IO.File]::WriteAllText("dist-installer/SHA256SUMS.txt", $checksum, [System.Text.Encoding]::ASCII)
           Copy-Item "docs/INSTALLAZIONE_WINDOWS.md" "dist-installer/ISTRUZIONI.txt"
 
       - name: Carica installer e hash
         uses: actions/upload-artifact@v4
         with:
-          name: Gestionale-Preventivi-1.0.14-Windows-x64
+          name: Gestionale-Preventivi-1.0.15-Windows-x64
           path: dist-installer/*
           if-no-files-found: error
           retention-days: 30

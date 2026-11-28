@@ -1,5 +1,5 @@
 #define AppName "Gestionale Preventivi"
-#define AppVersion "1.0.14"
+#define AppVersion "1.0.15"
 #define AppExeName "GestionalePreventivi.exe"
 
 [Setup]
@@ -10,7 +10,7 @@ AppPublisher=CorradoWEB 2026
 DefaultDirName={autopf}\Gestionale Preventivi
 DefaultGroupName={#AppName}
 OutputDir=..\..\dist-installer
-OutputBaseFilename=Gestionale Preventivi 1.0.14 Setup
+OutputBaseFilename=Gestionale Preventivi 1.0.15 Setup
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=admin

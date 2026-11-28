@@ -130,7 +130,7 @@ def _validate_document(path: Path, expected: dict[str, str]) -> dict[str, Any]:
         info = reader.metadata or {}
         keywords = str(info.get("/Keywords", ""))
         metadata = {}
-        for token in re.split(r"[,;]", keywords):
+        for token in re.split(r"\s*[,;]\s*|\s+(?=[A-Za-z_][A-Za-z0-9_]*=)", keywords):
             key, separator, value = token.strip().partition("=")
             if separator:
                 metadata[key.strip()] = value.strip()
