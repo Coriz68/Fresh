@@ -122,7 +122,7 @@ test('se WhatsApp non si apre copia solo il PDF verificato e mostra la stringa C
   sandbox.desktopBridge.open_whatsapp_chat = async () => { throw new Error('WhatsApp chiuso'); };
   await sandbox.share('customer');
   assert.ok(calls.some(call => call.startsWith('toast:PDF CLIENTE pronto. Premi Ctrl+V nella chat WhatsApp per allegarlo')));
-  assert.equal(shareInstructions.textContent, 'PDF CLIENTE pronto. Premi Ctrl+V nella chat WhatsApp per allegarlo');
+  assert.equal(shareInstructions.textContent, 'PDF CLIENTE pronto. Premi Ctrl+V nella chat WhatsApp per allegarlo. WhatsApp chiuso');
 });
 
 test('i pulsanti cliente e fornitore restano separati e l’invio resta manuale', () => {

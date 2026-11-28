@@ -946,7 +946,7 @@ async function shareQuotePdfViaWhatsApp(kind) {
       const copied = await desktopBridge.copy_whatsapp_pdf_clipboard(kind, generated.path, phone, quote.id, generated.revision, generated.moduleIds || [], generated.receipt);
       if (copied?.clipboardReady !== true || copied.path !== generated.path) throw openError;
       const manual = `PDF ${label} pronto. Premi Ctrl+V nella chat WhatsApp per allegarlo`;
-      setPdfShareInstructions(manual);
+      setPdfShareInstructions(`${manual}. ${openError.message}`);
       showToast(manual, true);
       return;
     }

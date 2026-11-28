@@ -15,11 +15,11 @@ VSVersionInfo(
         '041004B0',
         [StringStruct('CompanyName', 'CorradoWEB 2026'),
          StringStruct('FileDescription', 'Gestionale preventivi'),
-         StringStruct('FileVersion', '1.0.7'),
+         StringStruct('FileVersion', '1.0.8'),
          StringStruct('InternalName', 'GestionalePreventivi'),
          StringStruct('OriginalFilename', 'GestionalePreventivi.exe'),
          StringStruct('ProductName', 'Gestionale Preventivi'),
-         StringStruct('ProductVersion', '1.0.7')]
+         StringStruct('ProductVersion', '1.0.8')]
       )
     ]),
     VarFileInfo([VarStruct('Translation', [0x0410, 1200])])

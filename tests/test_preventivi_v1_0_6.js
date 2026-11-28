@@ -40,7 +40,7 @@ test('legacy storage and installer identity identifiers stay stable', () => {
   assert.match(installer, /DefaultDirName=\{autopf\}\\Gestionale Preventivi/);
 });
 
-test('upgrade configuration is consistently 1.0.7, preserves install paths, and documents WhatsApp checks', () => {
+test('upgrade configuration is consistently 1.0.8, preserves install paths, and documents WhatsApp checks', () => {
   const installer = fs.readFileSync(new URL('../packaging/windows/GestionalePreventivi.iss', `file://${__dirname}/`), 'utf8');
   const versionInfo = fs.readFileSync(new URL('../packaging/windows/version_info.txt', `file://${__dirname}/`), 'utf8');
   const workflow = fs.readFileSync(new URL('../.github/workflows/windows-installer.yml', `file://${__dirname}/`), 'utf8');
@@ -50,18 +50,20 @@ test('upgrade configuration is consistently 1.0.7, preserves install paths, and 
     fs.readFileSync(new URL('../Istruzioni_gestionale.txt', `file://${__dirname}/`), 'utf8')
   ];
 
-  assert.match(installer, /AppVersion "1\.0\.7"/);
+  assert.match(installer, /AppVersion "1\.0\.8"/);
   assert.match(installer, /DefaultDirName=\{autopf\}\\Gestionale Preventivi/);
   assert.match(installer, /Flags: ignoreversion/);
   assert.match(versionInfo, /filevers=\(1, 0, 7, 0\)/);
-  assert.match(versionInfo, /ProductVersion', '1\.0\.7'/);
-  assert.match(workflow, /Gestionale-Preventivi-1\.0\.7-Windows-x64/);
+  assert.match(versionInfo, /ProductVersion', '1\.0\.8'/);
+  assert.match(workflow, /Gestionale-Preventivi-1\.0\.8-Windows-x64/);
   assert.match(workflow, /-Filter \*\.html\)\.Count -ne 32/);
-  assert.match(instructions, /Gestionale Preventivi 1\.0\.7 Setup\.exe/);
+  assert.match(instructions, /Gestionale Preventivi 1\.0\.8 Setup\.exe/);
+  assert.match(instructions, /ShellExecuteW/);
+  assert.match(instructions, /Protocolli > WHATSAPP/);
   assert.match(instructions, /aggiornamento in-place dalla 1\.0\.5/i);
   assert.match(instructions, /non introduce un updater automatico/i);
   assert.match(instructions, /Windows 10\/11/);
-  assert.ok(manuals.every(text => /1\.0\.7/.test(text)));
+  assert.ok(manuals.every(text => /1\.0\.8/.test(text)));
 });
 
 function runPhoneNormalizer(value) {

@@ -101,6 +101,23 @@ class WhatsAppClipboardTests(unittest.TestCase):
                 sequence_reader=lambda: 1,
             )
 
+    def test_open_whatsapp_dispatches_protocol_through_windows_shell(self):
+        with patch.object(whatsapp, "_shell_execute_protocol", return_value=42) as launch:
+            result = whatsapp.open_whatsapp_chat("393331234567", platform_name="nt")
+        self.assertEqual(result, {"ok": True})
+        launch.assert_called_once_with("whatsapp://send?phone=393331234567")
+
+    def test_open_whatsapp_reports_missing_protocol_handler(self):
+        with patch.object(whatsapp, "_shell_execute_protocol", return_value=31):
+            with self.assertRaisesRegex(RuntimeError, "protocollo WhatsApp"):
+                whatsapp.open_whatsapp_chat("393331234567", platform_name="nt")
+
+    def test_open_whatsapp_rejects_invalid_phone_before_dispatch(self):
+        with patch.object(whatsapp, "_shell_execute_protocol") as launch:
+            with self.assertRaisesRegex(ValueError, "Numero WhatsApp"):
+                whatsapp.open_whatsapp_chat("bad-number", platform_name="nt")
+        launch.assert_not_called()
+
     def test_existing_exact_clipboard_path_is_preserved_and_only_ctrl_v_is_used(self):
         self.clipboard = [str(self.pdf)]
         with patch.object(whatsapp, "_windows_process_name", return_value="whatsapp.exe"):

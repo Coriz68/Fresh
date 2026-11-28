@@ -8,7 +8,6 @@ import os
 import re
 import threading
 import time
-import webbrowser
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any, Callable
@@ -216,13 +215,34 @@ def _verified_receipt(path: Path, expected: dict[str, Any], receipt: dict[str, A
     return details
 
 
+def _shell_execute_protocol(uri: str) -> int:
+    """Dispatch a registered URI protocol through Windows ShellExecute."""
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    shell32.ShellExecuteW.argtypes = [
+        wintypes.HWND,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        ctypes.c_int,
+    ]
+    shell32.ShellExecuteW.restype = ctypes.c_void_p
+    result = shell32.ShellExecuteW(None, "open", uri, None, None, 1)
+    return int(result or 0)
+
+
 def open_whatsapp_chat(phone: str, *, platform_name: str | None = None) -> dict[str, bool]:
     if (platform_name or os.name) != "nt":
         raise RuntimeError("WhatsApp Desktop è disponibile solo su Windows.")
     if not phone.isdigit() or not 8 <= len(phone) <= 15:
         raise ValueError("Numero WhatsApp non valido.")
-    if not webbrowser.open(f"whatsapp://send?phone={phone}"):
-        raise RuntimeError("Impossibile aprire WhatsApp Desktop.")
+    result = _shell_execute_protocol(f"whatsapp://send?phone={phone}")
+    if result <= 32:
+        raise RuntimeError(
+            "Windows non riesce ad avviare WhatsApp: il protocollo WhatsApp non è associato "
+            f"a un’app Desktop (codice {result}). Installa/aggiorna WhatsApp Desktop e controlla "
+            "App predefinite > Protocolli > WHATSAPP."
+        )
     return {"ok": True}
 
 
