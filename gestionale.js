@@ -619,7 +619,7 @@ function renderQuote() {
         <button class="button" data-action="mark-quote-sent" data-kind="supplier">Conferma invio PDF fornitore</button>
         <button class="button" data-action="save-quote">Salva preventivo</button>
         <button class="button" data-action="back-quotes">Torna all’archivio</button>
-        <div class="footer-note">Il PDF cliente include dati cliente, prezzi e riepilogo. Quello fornitore contiene solo i moduli tecnici selezionati, senza dati cliente o informazioni commerciali.</div>
+        <div class="footer-note">Il PDF cliente include dati cliente, prezzi e riepilogo. Quello fornitore contiene tutti i moduli con il nome del cliente, senza prezzi né altri dati del cliente.</div>
         ${!state.company.name ? '<p class="notice" style="margin-top:12px">Imposta i dati aziendali prima di generare il PDF cliente.</p>' : ''}
       </aside>
     </div>`;
