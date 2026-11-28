@@ -40,7 +40,7 @@ test('legacy storage and installer identity identifiers stay stable', () => {
   assert.match(installer, /DefaultDirName=\{autopf\}\\Gestionale Preventivi/);
 });
 
-test('upgrade configuration is consistently 1.0.19, preserves install paths, and documents WhatsApp fallback', () => {
+test('upgrade configuration is consistently 1.0.20, preserves install paths, and documents WhatsApp fallback', () => {
   const installer = fs.readFileSync(new URL('../packaging/windows/GestionalePreventivi.iss', `file://${__dirname}/`), 'utf8');
   const versionInfo = fs.readFileSync(new URL('../packaging/windows/version_info.txt', `file://${__dirname}/`), 'utf8');
   const workflow = fs.readFileSync(new URL('../.github/workflows/windows-installer.yml', `file://${__dirname}/`), 'utf8');
@@ -50,14 +50,14 @@ test('upgrade configuration is consistently 1.0.19, preserves install paths, and
     fs.readFileSync(new URL('../Istruzioni_gestionale.txt', `file://${__dirname}/`), 'utf8')
   ];
 
-  assert.match(installer, /AppVersion "1\.0\.19"/);
+  assert.match(installer, /AppVersion "1\.0\.20"/);
   assert.match(installer, /DefaultDirName=\{autopf\}\\Gestionale Preventivi/);
   assert.match(installer, /Flags: ignoreversion/);
-  assert.match(versionInfo, /filevers=\(1, 0, 19, 0\)/);
-  assert.match(versionInfo, /ProductVersion', '1\.0\.19'/);
-  assert.match(workflow, /Gestionale-Preventivi-1\.0\.19-Windows-x64/);
+  assert.match(versionInfo, /filevers=\(1, 0, 20, 0\)/);
+  assert.match(versionInfo, /ProductVersion', '1\.0\.20'/);
+  assert.match(workflow, /Gestionale-Preventivi-1\.0\.20-Windows-x64/);
   assert.match(workflow, /-Filter \*\.html\)\.Count -ne 32/);
-  assert.match(instructions, /Gestionale Preventivi 1\.0\.19 Setup\.exe/);
+  assert.match(instructions, /Gestionale Preventivi 1\.0\.20 Setup\.exe/);
   assert.match(instructions, /whatsapp:\/\/send/);
   assert.match(instructions, /web\.whatsapp\.com\/send/);
   assert.match(instructions, /non preme Invio/);
@@ -70,7 +70,7 @@ test('upgrade configuration is consistently 1.0.19, preserves install paths, and
   assert.match(instructions, /aggiornamento in-place dalla 1\.0\.5/i);
   assert.match(instructions, /non introduce un updater automatico/i);
   assert.match(instructions, /Windows 10\/11/);
-  assert.ok(manuals.every(text => /1\.0\.19/.test(text)));
+  assert.ok(manuals.every(text => /1\.0\.20/.test(text)));
 });
 
 function runPhoneNormalizer(value) {
@@ -286,7 +286,7 @@ test('quote list shows independent PDF send statuses', () => {
   assert.match(markup, /Non inviato/);
 });
 
-test('supplier module data keeps schema technical fields and removes identity, notes and installation fields', () => {
+test('supplier module data keeps technical fields and the client name, removing other identity, notes and installation fields', () => {
   const mapper = extractFunction('quoteModuleData');
   assert.ok(mapper, 'Il flusso di preparazione dei moduli deve separare i dati per destinazione PDF.');
   const sandbox = {
@@ -306,7 +306,7 @@ test('supplier module data keeps schema technical fields and removes identity, n
   const supplier = sandbox.quoteModuleData('supplier', originalData, client, quote, schemaFields);
   const customer = sandbox.quoteModuleData('customer', originalData, client, quote);
 
-  assert.equal(supplier.cliente, undefined);
+  assert.equal(supplier.cliente, 'Cliente Riservato', 'Il modulo fornitore riporta il nominativo del cliente corrente.');
   assert.equal(supplier.note, undefined);
   assert.equal(supplier.installazioneParete, undefined);
   assert.equal(supplier.prezzo, undefined);
@@ -338,9 +338,10 @@ test('all 32 module schemas exclude private and installation data while retainin
     data.cliente = 'Cliente Riservato';
     data.note = 'Nota riservata';
     const supplier = JSON.parse(JSON.stringify(sandbox.quoteModuleData('supplier', data, { name: 'Cliente Riservato' }, { number: 'PREV-42' }, schema.fields)));
-    for (const key of Object.keys(supplier)) assert.ok(!privateKey.test(key), `${file}: campo riservato ${key}`);
+    assert.ok(schema.fields.some(field => field.id === 'cliente'), `${file}: il modulo deve avere il campo Cliente`);
+    for (const key of Object.keys(supplier)) assert.ok(key === 'cliente' || !privateKey.test(key), `${file}: campo riservato ${key}`);
     assert.equal(supplier[technicalKey], 'valore', `${file}: campo tecnico ${technicalKey} deve essere mantenuto`);
-    assert.equal(supplier.cliente, undefined);
+    assert.equal(supplier.cliente, 'Cliente Riservato', `${file}: nome cliente mancante nel modulo fornitore`);
     assert.equal(supplier.note, undefined);
   }
 });

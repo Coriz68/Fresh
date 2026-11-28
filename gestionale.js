@@ -334,6 +334,8 @@ function quoteModuleData(kind, originalData, client, quote, schemaFields = []) {
     const technicalValues = flatten(filtered).join(' ').toLocaleLowerCase();
     if (identityValues.some(value => technicalValues.includes(value))) throw new Error('Un campo tecnico contiene dati anagrafici del cliente. PDF fornitore bloccato.');
     filtered.riferimento = quote.number;
+    // Il fornitore deve sapere per quale cliente è l'ordine: solo il nominativo, nessun altro dato anagrafico.
+    filtered.cliente = client.name || client.company || '';
     return filtered;
   }
   return { ...data, cliente: client.name || client.company || '', riferimento: quote.number };
@@ -1192,7 +1194,7 @@ async function generateQuotePdf(kind = 'customer', recipient = '', supplierItemI
         showPdfProgress('Unisco le pagine dei moduli…');
         const supplierBuilder = frame.contentWindow?.buildSupplierPdfDocument;
         if (typeof supplierBuilder !== 'function') throw new Error('Generatore PDF fornitore non disponibile.');
-        const forbiddenValues = [client.name, client.company, client.taxCode, client.vatNumber, client.address, client.email, client.phone].filter(value => String(value || '').trim().length >= 4);
+        const forbiddenValues = [client.taxCode, client.vatNumber, client.address, client.email, client.phone].filter(value => String(value || '').trim().length >= 4);
         bytes = await supplierBuilder(modulePdfs, { id: quote.id, revision: payload.quote.revision, kind, number: quote.number, recipient, moduleIds: includedItems.map(item => item.id), forbiddenValues });
       }
       if (JSON.stringify(getQuote()) !== quoteSnapshot) throw new Error('Il preventivo è cambiato durante la generazione. Rigenera il PDF aggiornato.');
@@ -1214,7 +1216,7 @@ async function generateQuotePdf(kind = 'customer', recipient = '', supplierItemI
         showPdfProgress('Salvo il PDF nella cartella configurata…');
         const base64 = bytesToBase64(bytes);
         const prefix = kind === 'customer' ? 'cliente' : 'fornitore';
-        const identity = { quote_id: quote.id, revision: payload.quote.revision, kind, recipient, module_ids: kind === 'supplier' ? includedItems.map(item => item.id) : [], forbidden_values: kind === 'supplier' ? [client.name, client.company, client.taxCode, client.vatNumber, client.address, client.email, client.phone].filter(value => String(value || '').trim().length >= 4) : [] };
+        const identity = { quote_id: quote.id, revision: payload.quote.revision, kind, recipient, module_ids: kind === 'supplier' ? includedItems.map(item => item.id) : [], forbidden_values: kind === 'supplier' ? [client.taxCode, client.vatNumber, client.address, client.email, client.phone].filter(value => String(value || '').trim().length >= 4) : [] };
         const saved = await desktopBridge.write_pdf(kind, `preventivo_${quote.id}_${payload.quote.revision.slice(0, 12)}_${prefix}.pdf`, base64, identity);
         savedPdfPath = saved.path;
         savedPdfReceipt = saved.receipt;
