@@ -580,14 +580,14 @@ function renderQuote() {
         <button class="button" data-action="duplicate-quote">Duplica preventivo</button>
         <button class="button primary" data-action="generate-pdf" data-kind="customer">Genera PDF cliente completo</button>
         <button class="button" data-action="generate-pdf" data-kind="supplier">Genera PDF fornitore · soli moduli</button>
-        ${desktopBridge ? `<button class="button" data-action="share-pdf-whatsapp" data-kind="customer" ${storagePaths.customer_pdf_dir ? '' : 'disabled'}>Condividi PDF cliente con WhatsApp</button>
-        <button class="button" data-action="share-pdf-whatsapp" data-kind="supplier" ${storagePaths.supplier_pdf_dir ? '' : 'disabled'}>Condividi PDF fornitore con WhatsApp</button>
-        <div class="footer-note">Il pulsante apre la chat WhatsApp, chiede conferma del destinatario e prepara l’allegato. Verifica il documento e invia manualmente.</div>` : ''}
+        ${desktopBridge ? `<button class="button" data-action="share-pdf-whatsapp" data-kind="customer" ${storagePaths.customer_pdf_dir ? '' : 'disabled'}>Prepara PDF cliente per WhatsApp</button>
+        <button class="button" data-action="share-pdf-whatsapp" data-kind="supplier" ${storagePaths.supplier_pdf_dir ? '' : 'disabled'}>Prepara PDF fornitore per WhatsApp</button>
+        <div class="footer-note">Dopo la generazione, usa le azioni separate nell’anteprima. Copia il PDF, apri la chat e invia manualmente.</div>` : ''}
         <button class="button" data-action="mark-quote-sent" data-kind="customer">Conferma invio PDF cliente</button>
         <button class="button" data-action="mark-quote-sent" data-kind="supplier">Conferma invio PDF fornitore</button>
         <button class="button" data-action="save-quote">Salva preventivo</button>
         <button class="button" data-action="back-quotes">Torna all’archivio</button>
-        <div class="footer-note">Il PDF cliente include riepilogo e moduli. Quello fornitore contiene solo i moduli, con nome cliente e riferimento al preventivo.</div>
+        <div class="footer-note">Il PDF cliente include dati cliente, prezzi e riepilogo. Quello fornitore contiene solo i moduli tecnici selezionati, senza dati cliente o informazioni commerciali.</div>
         ${!state.company.name ? '<p class="notice" style="margin-top:12px">Imposta i dati aziendali prima di generare il PDF cliente.</p>' : ''}
       </aside>
     </div>`;
@@ -906,34 +906,20 @@ function setPdfShareInstructions(message) {
 }
 
 async function shareQuotePdfViaWhatsApp(kind) {
-  if (!desktopBridge?.share_whatsapp_pdf) {
+  if (!desktopBridge?.copy_whatsapp_pdf_clipboard) {
     showToast('La condivisione WhatsApp è disponibile nella finestra desktop.', true);
     return;
   }
   if (!['customer', 'supplier'].includes(kind)) return;
-  if (whatsappShareActive) {
-    showToast('Preparazione WhatsApp già in corso. Attendi il completamento.', true);
+  if (whatsappShareActive || pdfGenerationActive) {
+    showToast('Operazione PDF già in corso. Attendi il completamento.', true);
     return;
   }
   whatsappShareActive = true;
   document.querySelectorAll?.('[data-action="share-pdf-whatsapp"]').forEach(button => { button.disabled = true; });
-  const actions = document.querySelector('#pdfShareActions');
-  if (actions) actions.hidden = false;
-  activeWhatsappPdf = null;
-  actions?.querySelectorAll('button').forEach(button => { button.disabled = true; });
   try {
     const quote = getQuote();
     if (!quote) return;
-    const client = activeClient(quote);
-    let phoneInput = client?.phone || '';
-    if (kind === 'supplier') phoneInput = window.prompt('Inserisci il numero WhatsApp del fornitore, con prefisso internazionale:') || '';
-    const normalizedPhone = normalizePhoneNumber(phoneInput);
-    if (normalizedPhone.empty || !normalizedPhone.valid) {
-      showToast(`Numero WhatsApp ${kind === 'customer' ? 'cliente' : 'fornitore'} mancante o non valido.`, true);
-      setPdfShareInstructions(`Numero WhatsApp ${kind === 'customer' ? 'cliente' : 'fornitore'} mancante o non valido. Correggilo prima di preparare il PDF.`);
-      return;
-    }
-    const phone = normalizedPhone.value.replace(/\D/g, '');
     let supplierItemIds = null;
     if (kind === 'supplier') {
       const choices = quote.items.map((item, index) => `${index + 1}. ${modules.find(model => model.id === item.moduleId)?.name || item.moduleId}`).join('\n');
@@ -945,32 +931,19 @@ async function shareQuotePdfViaWhatsApp(kind) {
       }
       supplierItemIds = indexes.map(index => quote.items[index - 1].id);
     }
-    const generated = await generateQuotePdf(kind, phone, supplierItemIds);
+    const generated = await generateQuotePdf(kind, '', supplierItemIds);
     if (!generated?.path) return;
-    if (!generated.receipt || generated.receipt.path !== generated.path || generated.receipt.sha256?.length !== 64) throw new Error('Ricevuta di integrità PDF non disponibile. Operazione interrotta.');
-    if (await quoteRevision(JSON.stringify(getQuote())) !== generated.revision) throw new Error('Il preventivo è cambiato dopo la generazione del PDF. Rigenera il documento.');
-    const message = `Buongiorno, condivido il PDF del preventivo ${quote.number}.`;
-    activeWhatsappPdf = { kind, path: generated.path, phone, quoteId: quote.id, revision: generated.revision, moduleIds: generated.moduleIds || [], receipt: generated.receipt, message };
-    actions?.querySelectorAll('[data-action="open-whatsapp"], [data-action="open-whatsapp-browser"], [data-action="open-pdf-folder"]').forEach(button => { button.disabled = false; });
-    if (/Mac|iPhone|iPad/i.test(String(window.navigator?.platform || ''))) {
-      await desktopBridge.open_whatsapp_browser(phone, message);
-      const macMessage = `PDF ${kind === 'customer' ? 'CLIENTE' : 'FORNITORE'} pronto per l'invio. Apri la chat nel browser e allega il PDF dalla cartella selezionata.`;
-      setPdfShareInstructions(macMessage);
-      showToast(macMessage);
-      return;
+    if (!generated.receipt || generated.receipt.path !== generated.path || generated.receipt.sha256?.length !== 64) {
+      throw new Error('Identità del PDF non verificabile. Rigenera il documento.');
     }
-    const result = await desktopBridge.share_whatsapp_pdf(kind, generated.path, phone, quote.id, generated.revision, generated.moduleIds || [], generated.receipt, message);
-    if (result?.clipboardReady !== true || result.path !== generated.path) throw new Error('Il PDF corretto non è verificabile negli appunti. Operazione interrotta.');
-    if (await quoteRevision(JSON.stringify(getQuote())) !== generated.revision) throw new Error('Il preventivo è cambiato durante la preparazione. Rigenera il PDF.');
+    if (await quoteRevision(JSON.stringify(getQuote())) !== generated.revision) {
+      throw new Error('Il preventivo è cambiato dopo la generazione. Rigenera il documento.');
+    }
     const label = kind === 'customer' ? 'CLIENTE' : 'FORNITORE';
-    const manual = `PDF ${label} pronto per l'invio. PDF copiato: premi Ctrl+V nella chat e poi Invio`;
-    const route = result.browserOpened ? `WhatsApp Desktop non disponibile: apertura della chat nel browser richiesta.${result.folderOpened ? ' PDF selezionato nella cartella.' : ''}` : result.desktopOpened ? 'Richiesta apertura WhatsApp Desktop inviata. Se non compare, usa gli altri pulsanti.' : `${result.folderOpened ? 'WhatsApp non avviato; cartella del PDF selezionata. ' : ''}Usa i pulsanti per aprire WhatsApp o la chat nel browser.`;
-    setPdfShareInstructions(`${manual}. ${route}`);
+    setPdfShareInstructions(`PDF ${label} pronto per l'invio. Scegli Copia PDF, Apri chat WhatsApp oppure Apri cartella.`);
     showToast(`PDF ${label} pronto per l'invio.`);
   } catch (error) {
-    activeWhatsappPdf = null;
-    actions?.querySelectorAll('button').forEach(button => { button.disabled = true; });
-    const failure = `Preparazione WhatsApp interrotta: ${error.message}`;
+    const failure = `PDF non pronto: ${error.message}`;
     setPdfShareInstructions(failure);
     showToast(failure, true);
   } finally {
@@ -981,34 +954,80 @@ async function shareQuotePdfViaWhatsApp(kind) {
   }
 }
 
+async function generateSupplierPdfPreview() {
+  const quote = getQuote();
+  if (!quote) return;
+  const choices = quote.items.map((item, index) => `${index + 1}. ${modules.find(model => model.id === item.moduleId)?.name || item.moduleId}`).join('\n');
+  const answer = window.prompt(`Seleziona i moduli pertinenti al fornitore, indicando i numeri separati da virgola.\n${choices}`) || '';
+  const indexes = answer.split(/[,;\s]+/).filter(Boolean).map(value => Number(value));
+  if (!indexes.length || indexes.some(index => !Number.isInteger(index) || index < 1 || index > quote.items.length) || new Set(indexes).size !== indexes.length) {
+    showToast('Selezione moduli fornitore non valida. PDF non generato.', true);
+    return;
+  }
+  await generateQuotePdf('supplier', '', indexes.map(index => quote.items[index - 1].id));
+}
+
 async function handleWhatsappPdfAction(action) {
   const target = activeWhatsappPdf;
-  if (!target || whatsappShareActive) return;
+  if (!target || whatsappShareActive || pdfGenerationActive) return;
+  if (!['copy-pdf', 'open-whatsapp', 'open-pdf-folder'].includes(action)) return;
   whatsappShareActive = true;
+  const copyButton = document.querySelector('#copyPdfButton');
+  if (action === 'copy-pdf' && copyButton) copyButton.disabled = true;
   try {
     const quote = getQuote();
     if (!quote || quote.id !== target.quoteId || await quoteRevision(JSON.stringify(quote)) !== target.revision) {
       throw new Error('Il preventivo è cambiato. Rigenera il PDF prima di continuare.');
     }
     const isMac = /Mac|iPhone|iPad/i.test(String(window.navigator?.platform || ''));
-    if (!isMac) {
-      const copied = await desktopBridge.copy_whatsapp_pdf_clipboard(target.kind, target.path, target.phone, target.quoteId, target.revision, target.moduleIds, target.receipt);
-      if (copied?.clipboardReady !== true || copied.path !== target.path) throw new Error('Il PDF corretto non è verificabile negli appunti.');
+    if (action === 'copy-pdf') {
+      if (isMac) throw new Error('Su macOS usa Apri cartella e allega il PDF dalla cartella configurata.');
+      if (!target.path || !target.receipt) throw new Error('PDF salvato non verificabile. Usa Apri cartella.');
+      const copied = await desktopBridge.copy_whatsapp_pdf_clipboard(target.kind, target.path, target.quoteId, target.revision, target.moduleIds, target.receipt);
+      if (copied?.clipboardReady !== true || copied.path !== target.path || !copied.filename) {
+        throw new Error('Copia del PDF non verificata. Usa Apri cartella.');
+      }
+      setPdfShareInstructions(`PDF copiato: ${copied.filename}. Apri la chat e premi Ctrl+V.`);
+      showToast(`PDF copiato: ${copied.filename}. Apri la chat e premi Ctrl+V.`);
+      return;
     }
     if (action === 'open-whatsapp') {
-      try { await desktopBridge.open_whatsapp_chat(target.phone, target.message); }
-      catch { await desktopBridge.open_whatsapp_browser(target.phone, target.message); }
-    } else if (action === 'open-whatsapp-browser') {
-      await desktopBridge.open_whatsapp_browser(target.phone, target.message);
-    } else if (action === 'open-pdf-folder') {
-      await desktopBridge.reveal_pdf_in_explorer(target.kind, target.path);
+      const storedRecipient = String(target.recipient || '').trim();
+      let phoneInput = storedRecipient
+        ? (/^(?:\+|00)/.test(storedRecipient) ? storedRecipient : `+${storedRecipient}`)
+        : target.kind === 'customer' ? activeClient(quote)?.phone || '' : '';
+      if (!phoneInput) phoneInput = window.prompt('Inserisci il numero WhatsApp del fornitore, con prefisso internazionale:') || '';
+      const normalized = normalizePhoneNumber(phoneInput);
+      if (normalized.empty || !normalized.valid) throw new Error(`Numero WhatsApp ${target.kind === 'customer' ? 'cliente' : 'fornitore'} mancante o non valido.`);
+      const phone = normalized.value.replace(/\D/g, '');
+      const message = `Buongiorno, condivido il PDF del preventivo ${quote.number}.`;
+      const result = isMac
+        ? await desktopBridge.open_whatsapp_browser(phone, message)
+        : await desktopBridge.open_whatsapp_chat(phone, message);
+      setPdfShareInstructions(result?.method === 'browser' || result?.browserOpened
+        ? 'Chat aperta in WhatsApp Web. Allegare il PDF e premere Invio.'
+        : 'Chat WhatsApp aperta. Allegare il PDF e premere Invio.');
+      showToast('Chat aperta. Il PDF non è stato inviato.');
+      return;
     }
+    if (!target.path) throw new Error('Il PDF salvato non è disponibile nella cartella configurata.');
+    await desktopBridge.reveal_pdf_in_explorer(target.kind, target.path);
+    setPdfShareInstructions('Cartella aperta con il PDF selezionato.');
+    showToast('Cartella aperta con il PDF selezionato.');
   } catch (error) {
-    setPdfShareInstructions(`PDF pronto per l'invio. ${error.message}`);
-    showToast(`PDF pronto per l'invio. ${error.message}`, true);
+    const failure = action === 'copy-pdf'
+      ? `Copia PDF non riuscita: ${error.message} Usa Apri cartella.`
+      : `Operazione non riuscita: ${error.message}`;
+    setPdfShareInstructions(failure);
+    showToast(failure, true);
   } finally {
     whatsappShareActive = false;
+    if (copyButton) copyButton.disabled = !activeWhatsappPdf?.path || pdfGenerationActive || isMacPlatform();
   }
+}
+
+function isMacPlatform() {
+  return /Mac|iPhone|iPad/i.test(String(window.navigator?.platform || ''));
 }
 
 async function markQuoteSent(kind) {
@@ -1067,6 +1086,10 @@ async function generateQuotePdf(kind = 'customer', recipient = '', supplierItemI
     return;
   }
   pdfGenerationActive = true;
+  activeWhatsappPdf = null;
+  const copyPdfButton = document.querySelector('#copyPdfButton');
+  if (copyPdfButton) copyPdfButton.disabled = true;
+  document.querySelectorAll('[data-action="open-whatsapp"], [data-action="open-pdf-folder"]').forEach(button => { button.disabled = true; });
   let quoteSnapshot = '';
   logDesktopEvent('pdf_generation_started');
   document.querySelectorAll('[data-action="generate-pdf"]').forEach(button => { button.disabled = true; });
@@ -1137,6 +1160,11 @@ async function generateQuotePdf(kind = 'customer', recipient = '', supplierItemI
       if (JSON.stringify(getQuote()) !== quoteSnapshot) throw new Error('Il preventivo è cambiato durante la generazione. Rigenera il PDF aggiornato.');
       generatedPdfBytes = bytes;
       generatedPdfKind = kind;
+      const copyLabel = kind === 'customer' ? 'Copia PDF cliente' : 'Copia PDF fornitore';
+      if (copyPdfButton) {
+        copyPdfButton.textContent = copyLabel;
+        copyPdfButton.disabled = true;
+      }
       const blob = new Blob([bytes], { type: 'application/pdf' });
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
       pdfUrl = URL.createObjectURL(blob);
@@ -1153,8 +1181,28 @@ async function generateQuotePdf(kind = 'customer', recipient = '', supplierItemI
         const saved = await desktopBridge.write_pdf(kind, `preventivo_${quote.id}_${payload.quote.revision.slice(0, 12)}_${prefix}.pdf`, base64, identity);
         savedPdfPath = saved.path;
         savedPdfReceipt = saved.receipt;
+        activeWhatsappPdf = {
+          kind,
+          path: savedPdfPath,
+          quoteId: quote.id,
+          revision: payload.quote.revision,
+          moduleIds: kind === 'supplier' ? includedItems.map(item => item.id) : [],
+          receipt: savedPdfReceipt,
+          recipient
+        };
+        document.querySelectorAll('[data-action="open-whatsapp"], [data-action="open-pdf-folder"]').forEach(button => { button.disabled = false; });
         showToast(`PDF ${prefix} salvato: ${saved.path}`);
       } else {
+        activeWhatsappPdf = {
+          kind,
+          path: '',
+          quoteId: quote.id,
+          revision: payload.quote.revision,
+          moduleIds: kind === 'supplier' ? includedItems.map(item => item.id) : [],
+          receipt: null,
+          recipient
+        };
+        document.querySelectorAll('[data-action="open-whatsapp"]').forEach(button => { button.disabled = false; });
         showToast(`Anteprima PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} pronta.`);
       }
     } finally {
@@ -1176,6 +1224,7 @@ async function generateQuotePdf(kind = 'customer', recipient = '', supplierItemI
     document.querySelectorAll('[data-action="share-pdf-whatsapp"]').forEach(button => {
       button.disabled = button.dataset.kind === 'customer' ? !storagePaths.customer_pdf_dir : !storagePaths.supplier_pdf_dir;
     });
+    if (copyPdfButton) copyPdfButton.disabled = !activeWhatsappPdf?.path || isMacPlatform();
   }
   return savedPdfPath ? { path: savedPdfPath, kind, revision: await quoteRevision(quoteSnapshot), moduleIds: kind === 'supplier' ? includedItems.map(item => item.id) : [], receipt: savedPdfReceipt } : null;
 }
@@ -1307,9 +1356,12 @@ function handleClick(event) {
       persistNow();
       renderQuote();
     }
-  } else if (action === 'generate-pdf') generateQuotePdf(button.dataset.kind || 'customer');
+  } else if (action === 'generate-pdf') {
+    if ((button.dataset.kind || 'customer') === 'supplier') generateSupplierPdfPreview();
+    else generateQuotePdf('customer');
+  }
   else if (action === 'share-pdf-whatsapp') shareQuotePdfViaWhatsApp(button.dataset.kind || 'customer');
-  else if (['open-whatsapp', 'open-whatsapp-browser', 'open-pdf-folder'].includes(action)) handleWhatsappPdfAction(action);
+  else if (['copy-pdf', 'open-whatsapp', 'open-pdf-folder'].includes(action)) handleWhatsappPdfAction(action);
   else if (action === 'mark-quote-sent') markQuoteSent(button.dataset.kind || 'customer');
   else if (action === 'save-quote') {
     const quote = getQuote();

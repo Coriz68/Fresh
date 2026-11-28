@@ -121,113 +121,40 @@ class DesktopApiTests(unittest.TestCase):
         self.assertFalse(hasattr(self.api, "window"))
         self.assertEqual(set(dir(self.api)), DesktopApi.EXPOSED_METHODS)
 
-    def test_whatsapp_methods_are_narrowly_exposed_with_existing_store_hidden(self):
+    def test_whatsapp_api_exposes_only_independent_copy_and_chat_actions(self):
         self.assertIn("open_whatsapp_chat", DesktopApi.EXPOSED_METHODS)
         self.assertIn("open_whatsapp_browser", DesktopApi.EXPOSED_METHODS)
-        self.assertIn("share_whatsapp_pdf", DesktopApi.EXPOSED_METHODS)
         self.assertIn("copy_whatsapp_pdf_clipboard", DesktopApi.EXPOSED_METHODS)
-        self.assertIn("prepare_whatsapp_pdf", DesktopApi.EXPOSED_METHODS)
+        self.assertNotIn("share_whatsapp_pdf", DesktopApi.EXPOSED_METHODS)
+        self.assertNotIn("prepare_whatsapp_pdf", DesktopApi.EXPOSED_METHODS)
         self.assertFalse(hasattr(self.api, "store"))
 
-    def test_share_whatsapp_pdf_copies_before_open_and_falls_back_to_browser_and_selected_folder(self):
+    def test_copy_whatsapp_pdf_checks_folder_identity_and_passes_receipt(self):
         customer_dir = self.root / "pdf cliente"
         customer_dir.mkdir()
         self.store.set_output_folder("customer", customer_dir)
         revision = "a" * 64
         pdf_path = customer_dir / f"preventivo_quote-42_{revision[:12]}_cliente.pdf"
         pdf_path.write_bytes(b"%PDF-1.7 sample")
-        receipt = {"path": str(pdf_path.resolve())}
-        order = []
+        receipt = {"path": str(pdf_path.resolve()), "recipient": "393331234567"}
+        with patch("whatsapp_windows.copy_pdf_to_clipboard", return_value={"clipboardReady": True}) as copy:
+            result = self.api.copy_whatsapp_pdf_clipboard("customer", str(pdf_path), "quote-42", revision, [], receipt, platform_name="nt")
+        self.assertEqual(result, {"clipboardReady": True})
+        copy.assert_called_once_with(str(pdf_path.resolve()), "customer", "quote-42", revision, [], receipt, platform_name="nt")
 
-        def copy(*args, **kwargs):
-            order.append("copy")
-            return {"clipboardReady": True, "path": args[0], "kind": args[1]}
-
-        def open_desktop(*args, **kwargs):
-            order.append("desktop")
-            raise OSError("protocol unavailable")
-
-        def open_browser(url, **kwargs):
-            order.append(url)
-            return True
-
-        with patch("whatsapp_windows.copy_pdf_to_clipboard", side_effect=copy), patch("whatsapp_windows.open_whatsapp_chat", side_effect=open_desktop), patch("webbrowser.open", side_effect=open_browser), patch("desktop_app._show_pdf_in_explorer", side_effect=lambda path: order.append(("folder", path))):
-            result = self.api.share_whatsapp_pdf("customer", str(pdf_path), "393331234567", "quote-42", revision, [], receipt, "Preventivo PREV-42", platform_name="nt")
-
-        self.assertTrue(result["clipboardReady"])
-        self.assertFalse(result["desktopOpened"])
-        self.assertTrue(result["browserOpened"])
-        self.assertTrue(result["folderOpened"])
-        self.assertEqual(order[0:2], ["copy", "desktop"])
-        self.assertIn("https://web.whatsapp.com/send?phone=393331234567&text=Preventivo%20PREV-42", order[2])
-        self.assertEqual(order[3][0], "folder")
-
-    def test_whatsapp_share_lock_serializes_clipboard_and_launch_procedures(self):
+    def test_copy_whatsapp_pdf_rejects_stale_revision_and_other_quote(self):
         customer_dir = self.root / "pdf cliente"
         customer_dir.mkdir()
         self.store.set_output_folder("customer", customer_dir)
         revision = "a" * 64
-        pdf_path = customer_dir / f"preventivo_quote-42_{revision[:12]}_cliente.pdf"
-        pdf_path.write_bytes(b"%PDF-1.7 sample")
-        receipt = {"path": str(pdf_path.resolve())}
-        lock = threading.Lock()
-        active = 0
-        max_active = 0
-
-        def copy(*args, **kwargs):
-            nonlocal active, max_active
-            with lock:
-                active += 1
-                max_active = max(max_active, active)
-            time.sleep(0.03)
-            with lock:
-                active -= 1
-            return {"clipboardReady": True, "path": args[0], "kind": args[1]}
-
-        def share():
-            self.api.share_whatsapp_pdf("customer", str(pdf_path), "393331234567", "quote-42", revision, [], receipt, "Preventivo", platform_name="nt")
-
-        with patch("whatsapp_windows.copy_pdf_to_clipboard", side_effect=copy), patch("whatsapp_windows.open_whatsapp_chat", return_value={"ok": True, "desktopOpened": True}):
-            first = threading.Thread(target=share)
-            second = threading.Thread(target=share)
-            first.start()
-            second.start()
-            first.join()
-            second.join()
-
-        self.assertEqual(max_active, 1)
-
-    def test_prepare_whatsapp_pdf_checks_folder_name_and_passes_exact_identity(self):
-        customer_dir = self.root / "pdf cliente"
-        customer_dir.mkdir()
-        self.store.set_output_folder("customer", customer_dir)
-        revision = "a" * 64
-        pdf_path = customer_dir / f"preventivo_quote-42_{revision[:12]}_cliente.pdf"
-        pdf_path.write_bytes(b"%PDF-1.7 fake")
-        receipt = {"path": str(pdf_path.resolve())}
-        with patch("whatsapp_windows.prepare_whatsapp_pdf", return_value={"attached": True}) as prepare:
-            result = self.api.prepare_whatsapp_pdf("customer", str(pdf_path), "393331234567", "quote-42", revision, [], receipt, platform_name="nt")
-        self.assertEqual(result, {"attached": True})
-        prepare.assert_called_once_with(str(pdf_path.resolve()), "customer", "393331234567", "quote-42", revision, [], receipt, platform_name="nt")
-
-    def test_prepare_whatsapp_pdf_rejects_a_different_revision_or_type_filename(self):
-        customer_dir = self.root / "pdf cliente"
-        customer_dir.mkdir()
-        self.store.set_output_folder("customer", customer_dir)
         stale = customer_dir / "preventivo_quote-42_000000000000_cliente.pdf"
-        stale.write_bytes(b"%PDF-1.7 fake")
+        stale.write_bytes(b"%PDF-1.7 sample")
         with self.assertRaisesRegex(ValueError, "revisione"):
-            self.api.prepare_whatsapp_pdf("customer", str(stale), "393331234567", "quote-42", "a" * 64, [], platform_name="nt")
-
-    def test_prepare_whatsapp_pdf_rejects_a_pdf_from_a_different_quote(self):
-        customer_dir = self.root / "pdf cliente"
-        customer_dir.mkdir()
-        self.store.set_output_folder("customer", customer_dir)
-        revision = "a" * 64
-        other_quote = customer_dir / f"preventivo_quote-41_{revision[:12]}_cliente.pdf"
-        other_quote.write_bytes(b"%PDF-1.7 fake")
+            self.api.copy_whatsapp_pdf_clipboard("customer", str(stale), "quote-42", revision, [], {"path": str(stale.resolve())}, platform_name="nt")
+        other = customer_dir / f"preventivo_quote-41_{revision[:12]}_cliente.pdf"
+        other.write_bytes(b"%PDF-1.7 sample")
         with self.assertRaisesRegex(ValueError, "preventivo, revisione e tipologia"):
-            self.api.prepare_whatsapp_pdf("customer", str(other_quote), "393331234567", "quote-42", revision, [], {"path": str(other_quote.resolve())}, platform_name="nt")
+            self.api.copy_whatsapp_pdf_clipboard("customer", str(other), "quote-42", revision, [], {"path": str(other.resolve())}, platform_name="nt")
 
     def test_write_pdf_returns_a_verified_receipt_for_generated_quote_documents(self):
         customer_dir = self.root / "pdf cliente"

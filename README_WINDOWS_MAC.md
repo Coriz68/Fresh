@@ -1,6 +1,6 @@
-# Gestionale preventivi — versione 1.0.12 · CorradoWEB 2026
+# Gestionale preventivi — versione 1.0.13 · CorradoWEB 2026
 
-Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0.12 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
+Il progetto include la configurazione per creare il setup Windows x64 `Gestionale Preventivi 1.0.13 Setup.exe` tramite GitHub Actions. Il setup usa PyInstaller e Inno Setup e non richiede Python sul computer del cliente. Per prerequisiti, download e installazione consulta [docs/INSTALLAZIONE_WINDOWS.md](docs/INSTALLAZIONE_WINDOWS.md).
 
 ## Requisiti
 
@@ -37,8 +37,8 @@ In **Azienda e PDF** seleziona una cartella database e due cartelle PDF diverse.
 - **Genera PDF fornitore · soli moduli** assembla solo le pagine dei moduli, senza riepilogo commerciale o prezzi.
 - Il PDF cliente contiene i dati anagrafici e il riepilogo economico. Il PDF fornitore contiene solo i moduli tecnici selezionati e non include dati cliente, prezzi, sconti, IVA, costi di installazione o riepiloghi economici.
 - I file vengono messi nelle rispettive cartelle. Le collisioni di nome ricevono un suffisso numerico, senza sovrascrivere i PDF esistenti.
-- I pulsanti WhatsApp validano il numero e il PDF, copiano il file corretto negli appunti e aprono direttamente il protocollo `whatsapp://send`. Se Windows non avvia WhatsApp Desktop, aprono WhatsApp Web nel browser e selezionano il PDF in Esplora file. Nell’anteprima sono sempre disponibili **Apri WhatsApp**, **Apri chat nel browser** e **Apri cartella col PDF selezionato**. Premi Ctrl+V nella chat e poi Invia: il gestionale non simula il tasto Invio e mostra solo che il PDF è pronto per l’invio. Su macOS il gestionale apre WhatsApp Web e Finder per l’allegato manuale; la generazione PDF resta invariata.
-- In caso di problemi, il registro tecnico locale con fasi, durata, esito e versioni di Windows/WhatsApp si trova in `logs/app.log` nella cartella dati dell’applicazione; non registra numeri, percorsi o contenuti dei PDF.
+- Ogni PDF salvato ha un nome distinto con identificativo del preventivo, revisione e tipo (`cliente` o `fornitore`); i nomi duplicati ricevono un suffisso numerico senza sovrascrivere file precedenti. Nell’anteprima ci sono tre azioni indipendenti: **Copia PDF cliente/fornitore**, **Apri chat WhatsApp**, **Apri cartella**. Su Windows, Copia PDF usa `Set-Clipboard -Path` e verifica il contenuto con `Get-Clipboard -Format FileDropList`; in caso di errore suggerisce Apri cartella. Apri chat valida il numero e prova `whatsapp://send`; solo se Windows rifiuta il protocollo apre WhatsApp Web. Aprire la chat non tocca gli appunti. Poi l’operatore preme Ctrl+V, controlla l’allegato e invia manualmente. L’app non automatizza la UI WhatsApp e non dichiara l’invio riuscito. Su macOS resta disponibile il percorso browser/Finder per allegare manualmente; la copia file negli appunti è disattivata.
+- In caso di problemi, il registro tecnico locale con metodo, fase, durata, esito e tipo di errore si trova in `logs/app.log` nella cartella dati dell’applicazione; non registra numeri, percorsi o contenuti dei PDF.
 
 Nell’aggiornamento da 1.0.5 a 1.0.6 l’archivio esistente viene salvato in una copia di sicurezza prima dell’aggiunta dei campi di stato invio. Le versioni successive preservano gli stessi dati locali. Esporta periodicamente un backup JSON e custodiscilo separatamente dal computer. Il database non è cifrato.
 

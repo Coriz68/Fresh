@@ -40,7 +40,7 @@ test('legacy storage and installer identity identifiers stay stable', () => {
   assert.match(installer, /DefaultDirName=\{autopf\}\\Gestionale Preventivi/);
 });
 
-test('upgrade configuration is consistently 1.0.12, preserves install paths, and documents WhatsApp fallback', () => {
+test('upgrade configuration is consistently 1.0.13, preserves install paths, and documents WhatsApp fallback', () => {
   const installer = fs.readFileSync(new URL('../packaging/windows/GestionalePreventivi.iss', `file://${__dirname}/`), 'utf8');
   const versionInfo = fs.readFileSync(new URL('../packaging/windows/version_info.txt', `file://${__dirname}/`), 'utf8');
   const workflow = fs.readFileSync(new URL('../.github/workflows/windows-installer.yml', `file://${__dirname}/`), 'utf8');
@@ -50,21 +50,27 @@ test('upgrade configuration is consistently 1.0.12, preserves install paths, and
     fs.readFileSync(new URL('../Istruzioni_gestionale.txt', `file://${__dirname}/`), 'utf8')
   ];
 
-  assert.match(installer, /AppVersion "1\.0\.12"/);
+  assert.match(installer, /AppVersion "1\.0\.13"/);
   assert.match(installer, /DefaultDirName=\{autopf\}\\Gestionale Preventivi/);
   assert.match(installer, /Flags: ignoreversion/);
-  assert.match(versionInfo, /filevers=\(1, 0, 12, 0\)/);
-  assert.match(versionInfo, /ProductVersion', '1\.0\.12'/);
-  assert.match(workflow, /Gestionale-Preventivi-1\.0\.12-Windows-x64/);
+  assert.match(versionInfo, /filevers=\(1, 0, 13, 0\)/);
+  assert.match(versionInfo, /ProductVersion', '1\.0\.13'/);
+  assert.match(workflow, /Gestionale-Preventivi-1\.0\.13-Windows-x64/);
   assert.match(workflow, /-Filter \*\.html\)\.Count -ne 32/);
-  assert.match(instructions, /Gestionale Preventivi 1\.0\.12 Setup\.exe/);
+  assert.match(instructions, /Gestionale Preventivi 1\.0\.13 Setup\.exe/);
   assert.match(instructions, /whatsapp:\/\/send/);
   assert.match(instructions, /web\.whatsapp\.com\/send/);
-  assert.match(instructions, /non simula Invio/);
+  assert.match(instructions, /non preme Invio/);
+  assert.match(instructions, /Copia PDF/);
+  assert.match(instructions, /Apri chat WhatsApp/);
+  assert.match(instructions, /Set-Clipboard -Path/);
+  assert.match(instructions, /Get-Clipboard -Format FileDropList/);
+  assert.doesNotMatch(instructions, /attivazione Store/i);
+  assert.match(instructions, /non usa UI Automation/i);
   assert.match(instructions, /aggiornamento in-place dalla 1\.0\.5/i);
   assert.match(instructions, /non introduce un updater automatico/i);
   assert.match(instructions, /Windows 10\/11/);
-  assert.ok(manuals.every(text => /1\.0\.12/.test(text)));
+  assert.ok(manuals.every(text => /1\.0\.13/.test(text)));
 });
 
 function runPhoneNormalizer(value) {
@@ -186,7 +192,7 @@ test('customer and supplier send timestamps are independent', async () => {
   assert.equal(quote.sentSupplierAt, null);
 });
 
-test('preparing a WhatsApp PDF does not mark a quote sent', async () => {
+test('preparing a WhatsApp PDF does not copy, open chat, or mark a quote sent', async () => {
   const share = extractFunction('shareQuotePdfViaWhatsApp');
   const instructions = extractFunction('setPdfShareInstructions');
   assert.ok(share, 'Il flusso WhatsApp del preventivo deve esistere.');
@@ -196,8 +202,8 @@ test('preparing a WhatsApp PDF does not mark a quote sent', async () => {
   const shareInstructions = { textContent: '', hidden: true };
   const sandbox = {
     desktopBridge: {
-      open_whatsapp_chat: async (...args) => { bridgeCalls.push(['open', ...args]); },
-      share_whatsapp_pdf: async (...args) => { bridgeCalls.push(['share', ...args]); return { clipboardReady: true, path: args[1], desktopOpened: true, browserOpened: false }; }
+      copy_whatsapp_pdf_clipboard: async (...args) => { bridgeCalls.push(['copy', ...args]); return { clipboardReady: true, path: args[1] }; },
+      open_whatsapp_chat: async (...args) => { bridgeCalls.push(['open', ...args]); }
     },
     document: { querySelector: selector => selector === '#pdfShareInstructions' ? shareInstructions : null },
     getQuote: () => quote,
@@ -208,6 +214,7 @@ test('preparing a WhatsApp PDF does not mark a quote sent', async () => {
     generateQuotePdf: async () => ({ path: 'C:/pdf/quote.pdf', revision: 'a'.repeat(64), receipt: { path: 'C:/pdf/quote.pdf', sha256: 'b'.repeat(64) } }),
     showToast: message => toasts.push(message),
     whatsappShareActive: false,
+    pdfGenerationActive: false,
     activeWhatsappPdf: null,
     storagePaths: { customer_pdf_dir: '/pdf', supplier_pdf_dir: '/pdf' }
   };
@@ -215,7 +222,7 @@ test('preparing a WhatsApp PDF does not mark a quote sent', async () => {
 
   await sandbox.shareQuotePdfViaWhatsApp('customer');
 
-  assert.equal(JSON.stringify(bridgeCalls), JSON.stringify([['share', 'customer', 'C:/pdf/quote.pdf', '393331234567', 'q1', 'a'.repeat(64), [], { path: 'C:/pdf/quote.pdf', sha256: 'b'.repeat(64) }, 'Buongiorno, condivido il PDF del preventivo PREV-1.']]));
+  assert.deepEqual(bridgeCalls, []);
   assert.match(toasts[0], /PDF CLIENTE pronto per l'invio/);
   assert.equal(shareInstructions.hidden, false);
   assert.equal(quote.sentCustomerAt, null);

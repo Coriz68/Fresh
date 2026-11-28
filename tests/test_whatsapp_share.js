@@ -7,172 +7,134 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(new URL('../gestionale.js', `file://${__dirname}/`), 'utf8');
 const htmlSource = fs.readFileSync(new URL('../Gestione_preventivi.html', `file://${__dirname}/`), 'utf8');
-const shareSource = source.match(/async function shareQuotePdfViaWhatsApp\([^)]*\) \{[\s\S]*?\n\}/)?.[0];
-const instructionsSource = source.match(/function setPdfShareInstructions\([^)]*\) \{[\s\S]*?\n\}/)?.[0];
+const actionSource = source.match(/async function handleWhatsappPdfAction\([^)]*\) \{[\s\S]*?\n\}/)?.[0];
+const macPlatformSource = source.match(/function isMacPlatform\(\) \{[\s\S]*?\n\}/)?.[0];
 
-function makeSandbox(pdfByKind, revealError = null) {
+function makeSandbox({ kind = 'customer', platform = 'Win32', targetOverrides = {}, phone = '3331234567' } = {}) {
   const calls = [];
   const quote = { id: 'quote-42', number: 'PREV-42', items: [{ id: 'item-1', moduleId: 'tenda' }], sentCustomerAt: null, sentSupplierAt: null };
-  const shareInstructions = { textContent: '', hidden: true };
+  const instructions = { textContent: '', hidden: true };
+  const copyButton = { disabled: false };
   const sandbox = {
     getQuote: () => quote,
-    activeClient: () => ({ phone: '3331234567' }),
-    normalizePhoneNumber: value => ({ value: `+39${value}`, valid: true }),
+    activeClient: () => ({ phone }),
+    normalizePhoneNumber: value => {
+      const clean = String(value || '').trim().replace(/[\s().-]/g, '').replace(/^00/, '+');
+      const normalized = clean.startsWith('+') ? clean : `+39${clean}`;
+      return { value: normalized, valid: /^\+[1-9]\d{7,14}$/.test(normalized), empty: !clean };
+    },
     quoteRevision: async () => 'a'.repeat(64),
-    generateQuotePdf: async (kind, phone, supplierItemIds) => {
-      calls.push(`generate:${kind}:${phone}`);
-      if (kind === 'supplier') calls.push(`modules:${JSON.stringify(supplierItemIds)}`);
-      const generated = pdfByKind?.[kind] ?? null;
-      return generated && { ...generated, receipt: generated.receipt || { path: generated.path, sha256: 'a'.repeat(64) } };
-    },
     desktopBridge: {
-      open_whatsapp_chat: async phone => { calls.push(`open:${phone}`); },
-      copy_whatsapp_pdf_clipboard: async (...args) => ({ clipboardReady: true, path: args[1] }),
-      open_whatsapp_browser: async (...args) => { calls.push(`browser:${JSON.stringify(args)}`); return { browserOpened: true }; },
-      share_whatsapp_pdf: async (...args) => {
-        calls.push(`share:${JSON.stringify(args)}`);
-        if (revealError) throw revealError;
-        return { clipboardReady: true, path: args[1], desktopOpened: true, browserOpened: false };
-      },
-      prepare_whatsapp_pdf: async (...args) => {
-        calls.push(`attach:${JSON.stringify(args)}`);
-        if (revealError) throw revealError;
-        const filename = args[1].split('/').pop();
-        return { attached: true, filename };
-      }
+      copy_whatsapp_pdf_clipboard: async (...args) => { calls.push(['copy', ...args]); return { clipboardReady: true, path: args[1], filename: args[1].split(/[\\/]/).pop() }; },
+      open_whatsapp_chat: async (...args) => { calls.push(['chat', ...args]); return { ok: true, method: 'protocol' }; },
+      open_whatsapp_browser: async (...args) => { calls.push(['browser', ...args]); return { browserOpened: true }; },
+      reveal_pdf_in_explorer: async (...args) => { calls.push(['folder', ...args]); return { ok: true }; }
     },
-    window: { confirm: () => true, alert: message => calls.push(`alert:${message}`), prompt: (() => { let count = 0; return () => ++count === 1 ? '3337654321' : '1'; })() },
-    modules: [{ id: 'tenda', name: 'Tenda da sole' }],
-    document: { querySelector: selector => selector === '#pdfShareInstructions' ? shareInstructions : null },
-    showToast: message => calls.push(`toast:${message}`),
+    window: { navigator: { platform }, prompt: () => '0039 333 7654321' },
+    document: { querySelector: selector => selector === '#pdfShareInstructions' ? instructions : selector === '#copyPdfButton' ? copyButton : null },
+    showToast: message => calls.push(['toast', message]),
+    setPdfShareInstructions: message => { instructions.textContent = message; instructions.hidden = false; },
     whatsappShareActive: false,
-    activeWhatsappPdf: null,
-    storagePaths: { customer_pdf_dir: '/pdf', supplier_pdf_dir: '/pdf' },
+    pdfGenerationActive: false,
+    activeWhatsappPdf: {
+      kind,
+      path: `/pdf/preventivo_quote-42_${'a'.repeat(12)}_${kind === 'customer' ? 'cliente' : 'fornitore'}.pdf`,
+      quoteId: 'quote-42',
+      revision: 'a'.repeat(64),
+      moduleIds: kind === 'supplier' ? ['item-1'] : [],
+      receipt: { path: `/pdf/preventivo_quote-42_${'a'.repeat(12)}_${kind === 'customer' ? 'cliente' : 'fornitore'}.pdf`, sha256: 'b'.repeat(64) },
+      recipient: '',
+      ...targetOverrides
+    },
     calls
   };
-  vm.runInNewContext(`${instructionsSource};\n${shareSource};\nthis.share = shareQuotePdfViaWhatsApp;`, sandbox);
-  return { sandbox, calls, quote, shareInstructions };
+  vm.runInNewContext(`${macPlatformSource};\n${actionSource};\nthis.handle = handleWhatsappPdfAction;`, sandbox);
+  return { sandbox, calls, instructions, quote, copyButton };
 }
 
-test('genera i PDF distinti, li prepara per l’invio e non simula Invio', async () => {
-  const { sandbox, calls, shareInstructions } = makeSandbox({
-    customer: { path: '/pdf/preventivo_quote-42_rev_cliente.pdf', revision: 'a'.repeat(64) },
-    supplier: { path: '/pdf/preventivo_quote-42_rev_fornitore.pdf', revision: 'a'.repeat(64), moduleIds: ['item-1'] }
-  });
+test('anteprima espone le tre azioni con etichetta Copia PDF dipendente dal tipo', () => {
+  assert.match(htmlSource, /id="copyPdfButton"[^>]*data-action="copy-pdf"/);
+  assert.match(htmlSource, /Copia PDF cliente/);
+  assert.match(source, /kind === 'customer' \? 'Copia PDF cliente' : 'Copia PDF fornitore'/);
+  assert.match(htmlSource, /data-action="open-whatsapp"[^>]*>Apri chat WhatsApp/);
+  assert.match(htmlSource, /data-action="open-pdf-folder"[^>]*>Apri cartella/);
+  assert.doesNotMatch(htmlSource, /open-whatsapp-browser/);
+});
 
-  await sandbox.share('customer');
+test('Copia PDF usa il documento corrente, verifica il percorso e dà istruzioni Ctrl+V', async () => {
+  const { sandbox, calls, instructions } = makeSandbox();
+  await sandbox.handle('copy-pdf');
+  assert.equal(calls[0][0], 'copy');
+  assert.equal(calls[0][1], 'customer');
+  assert.match(instructions.textContent, /PDF copiato: preventivo_quote-42/);
+  assert.match(instructions.textContent, /Apri la chat e premi Ctrl\+V/);
+  assert.equal(calls.some(call => call[0] === 'chat'), false);
+});
 
-  assert.equal(calls[0], 'generate:customer:393331234567');
-  assert.match(calls[1], /share:\["customer","\/pdf\/preventivo_quote-42_rev_cliente\.pdf","393331234567"/);
-  assert.equal(shareInstructions.hidden, false);
-  assert.match(shareInstructions.textContent, /pronto per l'invio/);
-  assert.match(shareInstructions.textContent, /premi Ctrl\+V nella chat e poi Invio/);
+test('Apri chat valida +39 e 00 prima del bridge e non modifica gli appunti', async () => {
+  const { sandbox, calls, instructions } = makeSandbox();
+  await sandbox.handle('open-whatsapp');
+  const chat = calls.find(call => call[0] === 'chat');
+  assert.deepEqual(chat.slice(1), ['393331234567', 'Buongiorno, condivido il PDF del preventivo PREV-42.']);
+  assert.equal(calls.some(call => call[0] === 'copy'), false);
+  assert.match(instructions.textContent, /Chat WhatsApp aperta/i);
 
   calls.length = 0;
-  await sandbox.share('supplier');
-  assert.equal(calls[0], 'generate:supplier:393337654321');
-  assert.equal(calls[1], 'modules:["item-1"]');
-  assert.match(calls[2], /share:\["supplier","\/pdf\/preventivo_quote-42_rev_fornitore\.pdf","393337654321".*"item-1"/);
-  assert.match(shareInstructions.textContent, /pronto per l'invio/);
+  sandbox.window.prompt = () => '+39 333 765 4321';
+  sandbox.activeWhatsappPdf.kind = 'supplier';
+  await sandbox.handle('open-whatsapp');
+  assert.equal(calls.find(call => call[0] === 'chat')[1], '393337654321');
+  assert.equal(calls.some(call => call[0] === 'copy'), false);
 });
 
-test('blocca prima del bridge un numero normalizzato ma non valido', async () => {
-  const { sandbox, calls, shareInstructions } = makeSandbox({
-    customer: { path: '/pdf/customer.pdf', revision: 'a'.repeat(64) }
-  });
-  sandbox.normalizePhoneNumber = () => ({ value: '+39abc', valid: false });
-
-  await sandbox.share('customer');
-
-  assert.ok(!calls.some(call => call.startsWith('generate:') || call.startsWith('share:') || call.startsWith('open:')));
-  assert.match(shareInstructions.textContent, /numero.*non valido/i);
+test('numero non valido blocca l’apertura prima del bridge', async () => {
+  const { sandbox, calls, instructions } = makeSandbox({ phone: '123' });
+  await sandbox.handle('open-whatsapp');
+  assert.equal(calls.some(call => call[0] === 'chat' || call[0] === 'browser'), false);
+  assert.match(instructions.textContent, /numero WhatsApp.*non valido/i);
 });
 
-test('se la generazione non produce PDF non apre WhatsApp', async () => {
-  const { sandbox, calls } = makeSandbox(null);
-  sandbox.getQuote().items = [{ id: 'item-1', moduleId: 'tenda' }];
-  sandbox.modules = [{ id: 'tenda', name: 'Tenda da sole' }];
-
-  await sandbox.share('supplier');
-
-  assert.deepEqual(calls, ['generate:supplier:393337654321', 'modules:["item-1"]']);
+test('cartella PDF è un’azione indipendente', async () => {
+  const { sandbox, calls } = makeSandbox();
+  await sandbox.handle('open-pdf-folder');
+  assert.equal(calls[0][0], 'folder');
+  assert.equal(calls.some(call => call[0] === 'copy' || call[0] === 'chat'), false);
 });
 
-test('prepara fornitore e poi cliente mantenendo i due flussi distinti', async () => {
-  const { sandbox, calls } = makeSandbox({
-    customer: { path: '/pdf/customer.pdf', revision: 'a'.repeat(64) },
-    supplier: { path: '/pdf/supplier.pdf', revision: 'a'.repeat(64), moduleIds: ['item-1'] }
-  });
-  await sandbox.share('supplier');
-  await sandbox.share('customer');
-  assert.ok(calls.some(call => call.includes('share:["supplier","/pdf/supplier.pdf"')));
-  assert.ok(calls.some(call => call.includes('share:["customer","/pdf/customer.pdf"')));
-});
-
-test('interrompe se il preventivo cambia dopo la generazione e non prepara il PDF obsoleto', async () => {
-  const { sandbox, calls, quote, shareInstructions } = makeSandbox({
-    customer: { path: '/pdf/customer.pdf', revision: 'a'.repeat(64) }
-  });
-  sandbox.quoteRevision = async serialized => JSON.parse(serialized).notes ? 'b'.repeat(64) : 'a'.repeat(64);
-  sandbox.desktopBridge.share_whatsapp_pdf = async (...args) => { calls.push(`share:${JSON.stringify(args)}`); quote.notes = 'modificato'; return { clipboardReady: true, path: args[1], desktopOpened: true }; };
-  await sandbox.share('customer');
-  assert.ok(!shareInstructions.textContent.includes('pronto per l’invio'));
-  assert.match(shareInstructions.textContent, /preventivo è cambiato/);
-});
-
-test('se l’identità del PDF non è verificabile non marca inviato e mostra l’errore', async () => {
-  const { sandbox, calls, quote, shareInstructions } = makeSandbox(
-    { customer: { path: '/pdf/preventivo_quote-42_rev_cliente.pdf', revision: 'a'.repeat(64) } },
-    new Error('Documento non verificabile')
-  );
-
-  await sandbox.share('customer');
-
-  assert.equal(quote.sentCustomerAt, null);
-  assert.equal(quote.sentSupplierAt, null);
-  assert.match(calls.at(-1), /Documento non verificabile/);
-  assert.equal(shareInstructions.hidden, false);
-  assert.match(shareInstructions.textContent, /Documento non verificabile/);
-});
-
-test('se WhatsApp Desktop non si apre il PDF resta pronto anche con fallback browser', async () => {
-  const { sandbox, calls, shareInstructions } = makeSandbox({
-    customer: { path: '/pdf/customer.pdf', revision: 'a'.repeat(64) }
-  });
-  sandbox.desktopBridge.share_whatsapp_pdf = async (...args) => {
-    calls.push(`share:${JSON.stringify(args)}`);
-    return { clipboardReady: true, path: args[1], desktopOpened: false, browserOpened: true };
+test('copia non verificata mostra un errore e suggerisce Apri cartella', async () => {
+  const { sandbox, calls, instructions } = makeSandbox();
+  sandbox.desktopBridge.copy_whatsapp_pdf_clipboard = async (...args) => {
+    calls.push(['copy', ...args]);
+    return { clipboardReady: false, path: '/pdf/altro.pdf' };
   };
-  await sandbox.share('customer');
-  assert.match(shareInstructions.textContent, /PDF CLIENTE pronto per l'invio/);
-  assert.match(shareInstructions.textContent, /PDF copiato: premi Ctrl\+V nella chat e poi Invio/);
+  await sandbox.handle('copy-pdf');
+  assert.match(instructions.textContent, /Copia PDF non riuscita/);
+  assert.match(instructions.textContent, /Usa Apri cartella/);
+  assert.equal(calls.some(call => call[0] === 'chat'), false);
 });
 
-test('i pulsanti cliente e fornitore restano separati e l’invio resta manuale', () => {
-  assert.match(source, /data-action="share-pdf-whatsapp" data-kind="customer"/);
-  assert.match(source, /data-action="share-pdf-whatsapp" data-kind="supplier"/);
+test('doppio clic su copia è serializzato e non sovrascrive l’azione', async () => {
+  const { sandbox, calls } = makeSandbox();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  sandbox.desktopBridge.copy_whatsapp_pdf_clipboard = async (...args) => {
+    calls.push(['copy', ...args]);
+    await gate;
+    return { clipboardReady: true, path: args[1], filename: args[1].split('/').pop() };
+  };
+  const first = sandbox.handle('copy-pdf');
+  const second = sandbox.handle('copy-pdf');
+  for (let index = 0; index < 10 && !calls.some(call => call[0] === 'copy'); index++) await Promise.resolve();
+  release();
+  await Promise.all([first, second]);
+  assert.equal(calls.filter(call => call[0] === 'copy').length, 1);
+});
+
+test('l’anteprima non confonde copia, apertura chat e invio effettivo', () => {
+  assert.doesNotMatch(actionSource, /markQuoteSent|sentCustomerAt|sentSupplierAt/);
+  assert.match(actionSource, /PDF copiato/);
+  assert.match(actionSource, /Chat aperta/);
   assert.match(source, /data-action="mark-quote-sent" data-kind="customer"/);
   assert.match(source, /data-action="mark-quote-sent" data-kind="supplier"/);
-  assert.match(source, /premi Ctrl\+V nella chat e poi Invio/i);
-  assert.match(htmlSource, /data-action="open-whatsapp"/);
-  assert.match(htmlSource, /data-action="open-whatsapp-browser"/);
-  assert.match(htmlSource, /data-action="open-pdf-folder"/);
-  assert.doesNotMatch(source, /WhatsApp Desktop apre la chat senza testo/);
-  assert.match(source, /action === 'share-pdf-whatsapp'/);
-  assert.match(source, /action === 'mark-quote-sent'/);
-});
-
-test('il doppio clic non avvia due condivisioni contemporanee', async () => {
-  const { sandbox, calls } = makeSandbox({ customer: { path: '/pdf/customer.pdf', revision: 'a'.repeat(64) } });
-  const releases = [];
-  sandbox.generateQuotePdf = async (kind, phone) => {
-    calls.push(`generate:${kind}:${phone}`);
-    await new Promise(resolve => { releases.push(resolve); });
-    return { path: '/pdf/customer.pdf', revision: 'a'.repeat(64), receipt: { path: '/pdf/customer.pdf', sha256: 'a'.repeat(64) } };
-  };
-  const first = sandbox.share('customer');
-  const second = sandbox.share('customer');
-  releases.forEach(resolve => resolve());
-  await Promise.all([first, second]);
-  assert.equal(calls.filter(call => call.startsWith('generate:')).length, 1);
+  assert.match(source, /pdfGenerationActive = true/);
 });

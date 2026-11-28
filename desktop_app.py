@@ -10,7 +10,6 @@ import subprocess
 import sys
 import threading
 import time
-import webbrowser
 from datetime import date
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -24,7 +23,6 @@ from local_store import LocalStore
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 APP_TITLE = "Gestionale preventivi"
 APP_LOGGER = logging.getLogger("area_tenda_preventivi")
-_WHATSAPP_SHARE_LOCK = threading.Lock()
 
 
 def _show_pdf_in_explorer(pdf_path: Path) -> None:
@@ -235,9 +233,7 @@ class DesktopApi:
         "reveal_pdf_in_explorer",
         "open_whatsapp_chat",
         "open_whatsapp_browser",
-        "share_whatsapp_pdf",
         "copy_whatsapp_pdf_clipboard",
-        "prepare_whatsapp_pdf",
         "log_event",
     })
     _ALLOWED_FRONTEND_EVENTS = frozenset({
@@ -318,15 +314,14 @@ class DesktopApi:
         APP_LOGGER.info("File manager opened on prepared PDF (%s)", kind)
         return {"ok": True}
 
-    def open_whatsapp_chat(self, phone: str, text: str = "", *, platform_name: str | None = None) -> dict[str, bool]:
+    def open_whatsapp_chat(self, phone: str, text: str = "", *, platform_name: str | None = None) -> dict[str, Any]:
         from whatsapp_windows import open_whatsapp_chat
         return open_whatsapp_chat(phone, text, platform_name=platform_name)
 
     def open_whatsapp_browser(self, phone: str, text: str) -> dict[str, Any]:
         started = time.perf_counter()
-        from whatsapp_windows import detect_whatsapp_installation, log_whatsapp_event, open_whatsapp_browser
-        details = detect_whatsapp_installation()
-        log_details = {"app_version": details.get("app_version", "non rilevabile"), "windows_version": platform.version()}
+        from whatsapp_windows import log_whatsapp_event, open_whatsapp_browser
+        log_details = {"windows_version": platform.version()}
         try:
             result = open_whatsapp_browser(phone, text)
             log_whatsapp_event(APP_LOGGER, "browser_button", "opened", duration_ms=round((time.perf_counter() - started) * 1000), **log_details)
@@ -335,72 +330,8 @@ class DesktopApi:
             log_whatsapp_event(APP_LOGGER, "browser_button", "failed", error=error, duration_ms=round((time.perf_counter() - started) * 1000), **log_details)
             raise RuntimeError("Non riesco ad aprire la chat WhatsApp nel browser. Il PDF resta pronto nella cartella configurata.") from error
 
-    def share_whatsapp_pdf(
-        self,
-        kind: str,
-        path: str,
-        phone: str,
-        quote_id: str,
-        revision: str,
-        module_ids: list[str] | None = None,
-        receipt: dict[str, Any] | None = None,
-        text: str = "",
-        *,
-        platform_name: str | None = None,
-    ) -> dict[str, Any]:
-        started = time.perf_counter()
-        from whatsapp_windows import (
-            copy_pdf_to_clipboard,
-            detect_whatsapp_installation,
-            log_whatsapp_event,
-            open_whatsapp_chat,
-            open_whatsapp_with_fallback,
-        )
-
-        # L'intero passaggio clipboard → avvio Desktop → eventuale browser è serializzato.
-        with _WHATSAPP_SHARE_LOCK:
-            diagnostics = detect_whatsapp_installation(platform_name=platform_name or os.name)
-            log_details = {"app_version": diagnostics.get("app_version", "non rilevabile"), "windows_version": platform.version()}
-            log_whatsapp_event(APP_LOGGER, "share", "started", **log_details)
-            try:
-                copied = self._prepare_whatsapp_clipboard(
-                    copy_pdf_to_clipboard, kind, path, phone, quote_id, revision, module_ids, receipt, platform_name
-                )
-            except Exception as error:
-                log_whatsapp_event(APP_LOGGER, "clipboard", "failed", error=error, duration_ms=round((time.perf_counter() - started) * 1000), **log_details)
-                raise
-            log_whatsapp_event(APP_LOGGER, "clipboard", "verified", duration_ms=round((time.perf_counter() - started) * 1000), **log_details)
-            route = open_whatsapp_with_fallback(
-                phone,
-                text,
-                desktop_open=lambda target: open_whatsapp_chat(target, text, platform_name=platform_name),
-                browser_open=lambda url: webbrowser.open(url, new=2),
-            )
-            if route.get("desktopOpened"):
-                log_whatsapp_event(APP_LOGGER, "route_desktop", "opened", duration_ms=round((time.perf_counter() - started) * 1000), **log_details)
-            elif route.get("browserOpened"):
-                log_whatsapp_event(APP_LOGGER, "route_browser", "opened", duration_ms=round((time.perf_counter() - started) * 1000), error_type=route.get("errorType"), **log_details)
-            else:
-                log_whatsapp_event(APP_LOGGER, "route_browser", "failed", duration_ms=round((time.perf_counter() - started) * 1000), error_type=route.get("browserErrorType"), **log_details)
-            if not route.get("desktopOpened"):
-                try:
-                    _show_pdf_in_explorer(Path(copied["path"]))
-                    route["folderOpened"] = True
-                    log_whatsapp_event(APP_LOGGER, "fallback_folder", "opened", duration_ms=round((time.perf_counter() - started) * 1000), **log_details)
-                except Exception as error:
-                    route["folderOpened"] = False
-                    log_whatsapp_event(APP_LOGGER, "fallback_folder", "failed", error=error, duration_ms=round((time.perf_counter() - started) * 1000), **log_details)
-            return {**copied, **route}
-
-    def copy_whatsapp_pdf_clipboard(self, kind: str, path: str, phone: str, quote_id: str, revision: str, module_ids: list[str] | None = None, receipt: dict[str, Any] | None = None, *, platform_name: str | None = None) -> dict[str, Any]:
+    def copy_whatsapp_pdf_clipboard(self, kind: str, path: str, quote_id: str, revision: str, module_ids: list[str] | None = None, receipt: dict[str, Any] | None = None, *, platform_name: str | None = None) -> dict[str, Any]:
         from whatsapp_windows import copy_pdf_to_clipboard
-        return self._prepare_whatsapp_clipboard(copy_pdf_to_clipboard, kind, path, phone, quote_id, revision, module_ids, receipt, platform_name)
-
-    def prepare_whatsapp_pdf(self, kind: str, path: str, phone: str, quote_id: str, revision: str, module_ids: list[str] | None = None, receipt: dict[str, Any] | None = None, *, platform_name: str | None = None) -> dict[str, Any]:
-        from whatsapp_windows import prepare_whatsapp_pdf
-        return self._prepare_whatsapp_clipboard(prepare_whatsapp_pdf, kind, path, phone, quote_id, revision, module_ids, receipt, platform_name)
-
-    def _prepare_whatsapp_clipboard(self, operation: Any, kind: str, path: str, phone: str, quote_id: str, revision: str, module_ids: list[str] | None, receipt: dict[str, Any] | None, platform_name: str | None) -> dict[str, Any]:
         path_key = {"customer": "customer_pdf_dir", "supplier": "supplier_pdf_dir"}.get(kind)
         if path_key is None:
             raise ValueError("Tipo PDF non riconosciuto.")
@@ -418,7 +349,7 @@ class DesktopApi:
             raise ValueError("Il nome del documento non corrisponde a preventivo, revisione e tipologia correnti.")
         if not receipt or receipt.get("path") != str(pdf_path):
             raise ValueError("Ricevuta PDF mancante o associata a un percorso diverso.")
-        return operation(str(pdf_path), kind, phone, quote_id, revision, module_ids, receipt, platform_name=platform_name)
+        return copy_pdf_to_clipboard(str(pdf_path), kind, quote_id, revision, module_ids, receipt, platform_name=platform_name)
 
     def load_initial_data(self) -> dict[str, Any]:
         started = time.perf_counter()
