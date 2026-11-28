@@ -102,10 +102,25 @@ class WhatsAppClipboardTests(unittest.TestCase):
             )
 
     def test_open_whatsapp_dispatches_protocol_through_windows_shell(self):
-        with patch.object(whatsapp, "_shell_execute_protocol", return_value=42) as launch:
-            result = whatsapp.open_whatsapp_chat("393331234567", platform_name="nt")
+        with patch.object(whatsapp, "_shell_execute_protocol", return_value=42) as launch, patch.object(whatsapp, "_windows_process_name", return_value="whatsapp.exe"):
+            result = whatsapp.open_whatsapp_chat(
+                "393331234567",
+                platform_name="nt",
+                desktop_factory=lambda **kwargs: FakeDesktop([self.window]),
+            )
         self.assertEqual(result, {"ok": True})
         launch.assert_called_once_with("whatsapp://send?phone=393331234567")
+        self.assertTrue(self.window.active)
+
+    def test_open_whatsapp_waits_for_a_visible_whatsapp_window(self):
+        with patch.object(whatsapp, "_shell_execute_protocol", return_value=42), patch.object(whatsapp, "_windows_process_name", return_value="whatsapp.exe"):
+            with self.assertRaisesRegex(RuntimeError, "finestra WhatsApp"):
+                whatsapp.open_whatsapp_chat(
+                    "393331234567",
+                    platform_name="nt",
+                    timeout=0.01,
+                    desktop_factory=lambda **kwargs: FakeDesktop([]),
+                )
 
     def test_open_whatsapp_reports_missing_protocol_handler(self):
         with patch.object(whatsapp, "_shell_execute_protocol", return_value=31):

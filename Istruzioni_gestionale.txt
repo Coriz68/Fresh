@@ -1,7 +1,7 @@
-GESTIONALE PREVENTIVI — VERSIONE 1.0.8 — CorradoWEB 2026
+GESTIONALE PREVENTIVI — VERSIONE 1.0.9 — CorradoWEB 2026
 
 INSTALLER WINDOWS
-- Il setup `Gestionale Preventivi 1.0.8 Setup.exe` installa l'app autonoma su Windows 10/11 a 64 bit; Python non è richiesto.
+- Il setup `Gestionale Preventivi 1.0.9 Setup.exe` installa l'app autonoma su Windows 10/11 a 64 bit; Python non è richiesto.
 - Se Microsoft Edge WebView2 Evergreen Runtime manca, il setup lo installa automaticamente; serve una connessione Internet.
 - Consulta `docs/INSTALLAZIONE_WINDOWS.md` per checksum, avvisi di sicurezza e istruzioni di installazione.
 

@@ -231,7 +231,7 @@ def _shell_execute_protocol(uri: str) -> int:
     return int(result or 0)
 
 
-def open_whatsapp_chat(phone: str, *, platform_name: str | None = None) -> dict[str, bool]:
+def open_whatsapp_chat(phone: str, *, platform_name: str | None = None, timeout: float = 20, desktop_factory: Callable[..., Any] | None = None) -> dict[str, bool]:
     if (platform_name or os.name) != "nt":
         raise RuntimeError("WhatsApp Desktop è disponibile solo su Windows.")
     if not phone.isdigit() or not 8 <= len(phone) <= 15:
@@ -243,6 +243,29 @@ def open_whatsapp_chat(phone: str, *, platform_name: str | None = None) -> dict[
             f"a un’app Desktop (codice {result}). Installa/aggiorna WhatsApp Desktop e controlla "
             "App predefinite > Protocolli > WHATSAPP."
         )
+    if desktop_factory is None:
+        try:
+            from pywinauto import Desktop
+        except ImportError as error:
+            raise RuntimeError("UI Automation non disponibile per verificare l’avvio di WhatsApp Desktop.") from error
+        desktop_factory = Desktop
+    desktop = desktop_factory(backend="uia")
+
+    def visible_whatsapp_window():
+        matches = [
+            window for window in desktop.windows()
+            if window.is_visible() and _windows_process_name(window.element_info.process) == "whatsapp.exe"
+        ]
+        if len(matches) > 1:
+            raise RuntimeError("Sono aperte più finestre WhatsApp; verifica dell’avvio interrotta.")
+        return matches[0] if matches else None
+
+    try:
+        window = _wait(visible_whatsapp_window, timeout, "finestra WhatsApp visibile")
+        window.set_focus()
+        _wait(lambda: window.is_active(), timeout, "focus della finestra WhatsApp")
+    except Exception as error:
+        raise RuntimeError(f"Windows ha accettato il collegamento, ma non riesco a verificare l’avvio di WhatsApp Desktop: {error}") from error
     return {"ok": True}
 
 
