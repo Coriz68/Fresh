@@ -117,7 +117,10 @@ window.buildQuotePdfDocument = async function (payload, modulePdfs) {
       drawTopText(page, `Netto (IVA esclusa): ${money(totals.netTotal)}`, totalX + 12, totalsTop + 44, 8, bold, teal, 227);
       drawTopText(page, `IVA ${totals.vatRate}%: ${money(totals.vatTotal)}`, totalX + 12, totalsTop + 59, 8, regular, muted, 227);
       drawTopText(page, `TOTALE: ${money(totals.grossTotal)}`, totalX + 12, totalsTop + 74, 12, bold, teal, 227);
-      if (quote.notes) drawTopText(page, `NOTE: ${quote.notes}`, 36, totalsTop + 9, 7, regular, muted, 490);
+      if (quote.notes) {
+        const noteLines = wrapPdfText(`NOTE: ${quote.notes}`, regular, 7, 490, Math.max(1, Math.floor((556 - totalsTop - 9) / 10)));
+        noteLines.forEach((line, index) => drawTopText(page, line, 36, totalsTop + 9 + index * 10, 7, regular, muted, 490));
+      }
     }
     drawLine(page, 36, 566, width - 36);
     drawTopText(page, company.footerNotes || company.name, 36, 573, 7, regular, muted, 680);
@@ -148,9 +151,33 @@ window.buildSupplierPdfDocument = async function (modulePdfs, quoteNumber, clien
 };
 
 function pdfSafeText(value) {
+  // Le font standard (WinAnsi) non codificano i caratteri di controllo: un "a capo"
+  // nelle note faceva fallire l'intera generazione del PDF.
   return String(value ?? '')
+    .replace(/\s*[\r\n]+\s*/g, ' · ')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
     .replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/…/g, '...')
-    .replace(/[^\u0000-\u00ff\u20ac]/g, '?');
+    .replace(/[^\u0020-\u00ff\u20ac]/g, '?');
+}
+
+function wrapPdfText(text, font, size, maxWidth, maxLines) {
+  const lines = [];
+  for (const paragraph of String(text ?? '').split(/\r\n|\r|\n/)) {
+    let line = '';
+    for (const word of pdfSafeText(paragraph).split(' ').filter(Boolean)) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (!line || font.widthOfTextAtSize(candidate, size) <= maxWidth) line = candidate;
+      else {
+        lines.push(line);
+        line = word;
+      }
+    }
+    lines.push(line);
+  }
+  while (lines.length && !lines.at(-1)) lines.pop();
+  const kept = lines.slice(0, maxLines);
+  if (lines.length > maxLines) kept[maxLines - 1] += '...';
+  return kept.map(line => fitPdfText(line, font, size, maxWidth));
 }
 
 function fitPdfText(text, font, size, maxWidth) {

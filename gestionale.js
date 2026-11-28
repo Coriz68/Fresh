@@ -28,6 +28,7 @@ let toastTimer;
 let pdfUrl = '';
 let generatedPdfBytes = null;
 let generatedPdfKind = 'customer';
+let pdfGenerationRunning = false;
 
 const emptyState = () => ({
   clients: [],
@@ -169,6 +170,36 @@ async function loadCatalog() {
   return entries;
 }
 
+function normalizeState(value) {
+  const base = emptyState();
+  const source = value && typeof value === 'object' ? value : {};
+  const company = source.company && typeof source.company === 'object' ? source.company : {};
+  const normalized = {
+    ...source,
+    clients: Array.isArray(source.clients) ? source.clients.filter(client => client && typeof client === 'object') : [],
+    quotes: Array.isArray(source.quotes) ? source.quotes.filter(quote => quote && typeof quote === 'object') : [],
+    prices: source.prices && typeof source.prices === 'object' && !Array.isArray(source.prices) ? source.prices : {},
+    company: { ...base.company }
+  };
+  for (const key of Object.keys(base.company)) {
+    normalized.company[key] = company[key] == null ? '' : String(company[key]);
+  }
+  normalized.quotes.forEach(quote => {
+    quote.id ||= makeId();
+    quote.number = String(quote.number || '');
+    quote.createdAt = String(quote.createdAt || '');
+    quote.updatedAt = String(quote.updatedAt || quote.createdAt || '');
+    quote.status ||= 'bozza';
+    quote.items = Array.isArray(quote.items) ? quote.items.filter(item => item && typeof item === 'object') : [];
+    quote.items.forEach(item => {
+      item.id ||= makeId();
+      item.data = item.data && typeof item.data === 'object' ? item.data : {};
+    });
+  });
+  normalized.clients.forEach(client => { client.id ||= makeId(); });
+  return normalized;
+}
+
 function getQuote(id = currentQuoteId) {
   return state.quotes.find(quote => quote.id === id);
 }
@@ -264,7 +295,7 @@ function renderDashboard() {
   const latest = [...state.quotes].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 6);
   app.innerHTML = `
     <div class="stat-grid">
-      <section class="card stat"><div class="stat-label">Preventivi totali</div><div class="stat-value">${state.quotes.length}</div><div class="stat-foot">Salvati in questo browser</div></section>
+      <section class="card stat"><div class="stat-label">Preventivi totali</div><div class="stat-value">${state.quotes.length}</div><div class="stat-foot">${desktopBridge ? 'Salvati nella cartella database' : 'Salvati in questo browser'}</div></section>
       <section class="card stat"><div class="stat-label">In lavorazione</div><div class="stat-value">${openQuotes}</div><div class="stat-foot">Bozze e preventivi inviati</div></section>
       <section class="card stat"><div class="stat-label">Clienti registrati</div><div class="stat-value">${totalClients}</div><div class="stat-foot">Anagrafiche disponibili</div></section>
     </div>
@@ -281,7 +312,7 @@ function renderDashboard() {
         <div class="stack">
           <div><span class="badge">${state.company.name ? 'Completato' : 'Da configurare'}</span><p class="client-detail"><a class="module-link" href="#" data-page="company">Dati aziendali, intestazione e note PDF →</a></p></div>
           <div><span class="badge">${Object.keys(state.prices).length ? 'Iniziato' : 'Da configurare'}</span><p class="client-detail"><a class="module-link" href="#" data-page="prices">Inserisci i prezzi di listino dei moduli →</a></p></div>
-          <div class="footer-note">Il gestionale non usa servizi cloud: clienti, preventivi e impostazioni restano nel database del browser su questo computer. Esporta periodicamente un backup.</div>
+          <div class="footer-note">Il gestionale non usa servizi cloud: clienti, preventivi e impostazioni restano ${desktopBridge ? 'nel file preventivi.json della cartella database' : 'nel database del browser'} su questo computer. Esporta periodicamente un backup.</div>
         </div>
       </section>
     </div>`;
@@ -396,7 +427,7 @@ async function chooseDatabaseFolder() {
     await desktopBridge.save_state(structuredClone(state));
   }
   const result = await desktopBridge.set_database_folder(selection.path, mode, mode === 'copy-current' ? structuredClone(state) : null);
-  state = result.state;
+  state = normalizeState(result.state);
   storagePaths = result.paths;
   databaseError = '';
   currentQuoteId = null;
@@ -478,7 +509,12 @@ function openFormDialog(title, body, onSubmit) {
   formDialog.querySelector('form').addEventListener('submit', async event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget).entries());
-    await onSubmit(values);
+    try {
+      if (await onSubmit(values) === false) return;
+    } catch (error) {
+      showToast(error.message, true);
+      return;
+    }
     formDialog.close();
   });
 }
@@ -504,7 +540,7 @@ function openClientDialog(existing = null) {
     const client = { ...(existing || {}), ...values, id: existing?.id || makeId(), updatedAt: new Date().toISOString() };
     if (!client.name.trim() && !client.company.trim()) {
       showToast('Inserisci il nome del cliente o la ragione sociale.', true);
-      return;
+      return false;
     }
     if (existing) state.clients = state.clients.map(item => item.id === existing.id ? client : item);
     else state.clients.push(client);
@@ -592,6 +628,8 @@ async function loadModuleFrame(model) {
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (!target.matches('input:not([type="file"]),textarea,button[aria-pressed]')) return;
+      // Durante la generazione PDF l'iframe mostra altri moduli: non vanno copiati nella riga aperta.
+      if (pdfGenerationRunning) return;
       clearTimeout(modulePullTimer);
       modulePullTimer = setTimeout(() => pullActiveModule().catch(error => showToast(error.message, true)), 180);
     };
@@ -648,6 +686,7 @@ async function openModuleEditor(itemId) {
 }
 
 async function pullActiveModule() {
+  if (pdfGenerationRunning) return;
   const quote = getQuote();
   const item = quote?.items.find(entry => entry.id === activeModuleItemId);
   if (!item || !frame.contentWindow) return;
@@ -658,14 +697,21 @@ async function pullActiveModule() {
 }
 
 async function closeModuleEditor() {
+  if (pdfGenerationRunning) {
+    showToast('Attendi il termine della generazione del PDF.', true);
+    return;
+  }
+  clearTimeout(modulePullTimer);
   try {
     await pullActiveModule();
-    moduleDialog.close();
-    activeModuleItemId = null;
-    renderQuote();
   } catch (error) {
     showToast(error.message, true);
+    // Senza questa via d'uscita un modulo che non risponde bloccava la finestra per sempre.
+    if (!confirm(`${error.message}\n\nChiudere comunque il modulo? Le modifiche non salvate in questo modulo andranno perse.`)) return;
   }
+  moduleDialog.close();
+  activeModuleItemId = null;
+  renderQuote();
 }
 
 function updateQuoteField(target) {
@@ -745,11 +791,17 @@ async function generateQuotePdf(kind = 'customer') {
     showToast('Imposta un prezzo di listino maggiore di zero per ogni articolo.', true);
     return;
   }
+  if (pdfGenerationRunning) {
+    showToast('Generazione PDF già in corso: attendi il termine.', true);
+    return;
+  }
   const resumeModuleItemId = moduleDialog.open ? activeModuleItemId : null;
   try {
     if (resumeModuleItemId) {
+      clearTimeout(modulePullTimer);
       await pullActiveModule();
     }
+    pdfGenerationRunning = true;
     showToast(`Genero il PDF ${kind === 'customer' ? 'cliente' : 'fornitore'} dai moduli originali…`);
     const modulePdfs = [];
     try {
@@ -822,6 +874,8 @@ async function generateQuotePdf(kind = 'customer') {
     }
   } catch (error) {
     showToast(`PDF non generato: ${error.message}`, true);
+  } finally {
+    pdfGenerationRunning = false;
   }
 }
 
@@ -877,7 +931,9 @@ async function restoreBackupPayload(payload) {
     throw new Error(databaseError || 'Scegli prima la cartella del database locale.');
   }
   if (!confirm('Il ripristino sostituisce clienti, preventivi e impostazioni salvati in questo database. Continuare?')) return;
-  state = payload.dati;
+  state = normalizeState(payload.dati);
+  currentQuoteId = null;
+  if (currentPage === 'quote') currentPage = 'quotes';
   await persistNow();
   render();
   showToast('Backup ripristinato.');
@@ -1066,10 +1122,7 @@ async function init() {
       [db, modules] = await Promise.all([openDatabase(), loadCatalog()]);
       state = await readState() || emptyState();
     }
-    state.clients ||= [];
-    state.quotes ||= [];
-    state.prices ||= {};
-    state.company = { ...emptyState().company, ...(state.company || {}) };
+    state = normalizeState(state);
     if (desktopBridge && (!storagePaths.database_dir || databaseError)) currentPage = 'company';
     render();
     if (desktopBridge && !storagePaths.database_dir) {
