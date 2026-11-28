@@ -233,6 +233,36 @@ async function loadCatalog() {
   return entries;
 }
 
+function normalizeState(value) {
+  const base = emptyState();
+  const source = value && typeof value === 'object' ? value : {};
+  const company = source.company && typeof source.company === 'object' ? source.company : {};
+  const normalized = {
+    ...source,
+    clients: Array.isArray(source.clients) ? source.clients.filter(client => client && typeof client === 'object') : [],
+    quotes: Array.isArray(source.quotes) ? source.quotes.filter(quote => quote && typeof quote === 'object') : [],
+    prices: source.prices && typeof source.prices === 'object' && !Array.isArray(source.prices) ? source.prices : {},
+    company: { ...company }
+  };
+  for (const key of Object.keys(base.company)) {
+    normalized.company[key] = company[key] == null ? '' : String(company[key]);
+  }
+  normalized.quotes.forEach(quote => {
+    quote.id ||= makeId();
+    quote.number = String(quote.number || '');
+    quote.createdAt = String(quote.createdAt || '');
+    quote.updatedAt = String(quote.updatedAt || quote.createdAt || '');
+    quote.status ||= 'bozza';
+    quote.items = Array.isArray(quote.items) ? quote.items.filter(item => item && typeof item === 'object') : [];
+    quote.items.forEach(item => {
+      item.id ||= makeId();
+      item.data = item.data && typeof item.data === 'object' ? item.data : {};
+    });
+  });
+  normalized.clients.forEach(client => { client.id ||= makeId(); });
+  return normalized;
+}
+
 function getQuote(id = currentQuoteId) {
   return state.quotes.find(quote => quote.id === id);
 }
@@ -511,7 +541,7 @@ async function chooseDatabaseFolder() {
     if (!await persistNow()) throw new Error('Impossibile salvare i dati nella cartella database attuale. La cartella non è stata cambiata.');
   }
   const result = await desktopBridge.set_database_folder(selection.path, mode, mode === 'copy-current' ? structuredClone(state) : null);
-  state = result.state;
+  state = normalizeState(result.state);
   storagePaths = result.paths;
   databaseError = '';
   currentQuoteId = null;
@@ -770,6 +800,8 @@ async function loadModuleFrame(model) {
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (!target.matches('input:not([type="file"]),textarea,button[aria-pressed]')) return;
+      // Durante la generazione PDF l'iframe mostra altri moduli: non vanno copiati nella riga aperta.
+      if (pdfGenerationActive) return;
       clearTimeout(modulePullTimer);
       modulePullTimer = setTimeout(() => pullActiveModule().catch(error => showToast(error.message, true)), 180);
     };
@@ -836,14 +868,21 @@ async function pullActiveModule() {
 }
 
 async function closeModuleEditor() {
+  if (pdfGenerationActive) {
+    showToast('Attendi il termine della generazione del PDF.', true);
+    return;
+  }
+  clearTimeout(modulePullTimer);
   try {
     await pullActiveModule();
-    moduleDialog.close();
-    activeModuleItemId = null;
-    renderQuote();
   } catch (error) {
     showToast(error.message, true);
+    // Senza questa via d'uscita un modulo che non risponde bloccava la finestra per sempre.
+    if (!confirm(`${error.message}\n\nChiudere comunque il modulo? Le modifiche non salvate in questo modulo andranno perse.`)) return;
   }
+  moduleDialog.close();
+  activeModuleItemId = null;
+  renderQuote();
 }
 
 function updateQuoteField(target) {
@@ -1288,7 +1327,9 @@ async function restoreBackupPayload(payload) {
     throw new Error(databaseError || 'Scegli prima la cartella del database locale.');
   }
   if (!confirm('Il ripristino sostituisce clienti, preventivi e impostazioni salvati in questo database. Continuare?')) return;
-  state = payload.dati;
+  state = normalizeState(payload.dati);
+  currentQuoteId = null;
+  if (currentPage === 'quote') currentPage = 'quotes';
   await persistNow();
   render();
   showToast('Backup ripristinato.');
@@ -1499,10 +1540,7 @@ async function init() {
       [db, modules] = await Promise.all([openDatabase(), loadCatalog()]);
       state = await readState() || emptyState();
     }
-    state.clients ||= [];
-    state.quotes ||= [];
-    state.prices ||= {};
-    state.company = { ...emptyState().company, ...(state.company || {}) };
+    state = normalizeState(state);
     if (desktopBridge && (!storagePaths.database_dir || databaseError)) currentPage = 'company';
     render();
     if (desktopBridge && !storagePaths.database_dir) {
